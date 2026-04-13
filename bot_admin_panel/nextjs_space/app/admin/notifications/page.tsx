@@ -34,6 +34,7 @@ export default function NotificationsPage() {
   const [recipientType, setRecipientType] = useState('all');
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
   // Cargar notificaciones
   useEffect(() => {
@@ -57,17 +58,32 @@ export default function NotificationsPage() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Validar formulario
+  const validateForm = () => {
+    const errors: string[] = [];
 
-    // Validaciones
     if (!title.trim()) {
-      setErrorMessage('El título es requerido');
-      return;
+      errors.push('El título es requerido');
+    } else if (title.length > 255) {
+      errors.push('El título no puede exceder 255 caracteres');
     }
 
     if (!message.trim()) {
-      setErrorMessage('El mensaje es requerido');
+      errors.push('El mensaje es requerido');
+    } else if (message.length > 5000) {
+      errors.push('El mensaje no puede exceder 5000 caracteres');
+    }
+
+    setValidationErrors(errors);
+    return errors.length === 0;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // Validar antes de enviar
+    if (!validateForm()) {
+      setErrorMessage('Por favor corrige los errores');
       return;
     }
 
@@ -95,13 +111,16 @@ export default function NotificationsPage() {
         setMessage('');
         setType('info');
         setRecipientType('all');
-        
-        // Recargar notificaciones
+        setValidationErrors([]);
+
         setTimeout(() => {
           fetchNotifications();
         }, 500);
       } else {
         setErrorMessage(result.error || 'Error al enviar notificación');
+        if (result.errors) {
+          setValidationErrors(result.errors);
+        }
       }
     } catch (error: any) {
       console.error('Error:', error);
@@ -124,6 +143,7 @@ export default function NotificationsPage() {
       if (response.ok) {
         setNotifications(notifications.filter(n => n.id !== id));
         setSuccessMessage('Notificación eliminada');
+        setTimeout(() => setSuccessMessage(''), 3000);
       }
     } catch (error) {
       console.error('Error deleting notification:', error);
@@ -145,6 +165,17 @@ export default function NotificationsPage() {
             </Alert>
           )}
 
+          {validationErrors.length > 0 && (
+            <Alert variant="destructive" className="mb-4">
+              <AlertCircle className="h-4 w-4" />
+              <div className="space-y-1">
+                {validationErrors.map((err, idx) => (
+                  <AlertDescription key={idx}>• {err}</AlertDescription>
+                ))}
+              </div>
+            </Alert>
+          )}
+
           {successMessage && (
             <Alert className="mb-4 bg-green-50 border-green-200">
               <CheckCircle className="h-4 w-4 text-green-600" />
@@ -154,23 +185,36 @@ export default function NotificationsPage() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-2">Título *</label>
+              <label className="block text-sm font-medium mb-2">
+                Título *
+                <span className="text-gray-500 ml-2">
+                  ({title.length}/255)
+                </span>
+              </label>
               <Input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Título de la notificación"
                 disabled={formLoading}
+                maxLength={255}
+                className={validationErrors.some(e => e.includes('título')) ? 'border-red-500' : ''}
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2">Mensaje *</label>
+              <label className="block text-sm font-medium mb-2">
+                Mensaje *
+                <span className="text-gray-500 ml-2">
+                  ({message.length}/5000)
+                </span>
+              </label>
               <Textarea
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 placeholder="Contenido del mensaje"
                 className="h-32"
                 disabled={formLoading}
+                maxLength={5000}
               />
             </div>
 
@@ -205,9 +249,9 @@ export default function NotificationsPage() {
               </div>
             </div>
 
-            <Button 
-              type="submit" 
-              disabled={formLoading || !title.trim() || !message.trim()}
+            <Button
+              type="submit"
+              disabled={formLoading || !title.trim() || !message.trim() || validationErrors.length > 0}
               className="w-full"
             >
               {formLoading ? (

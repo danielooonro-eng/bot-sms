@@ -6,6 +6,31 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
 );
 
+// Validar usuario
+function validateUser(data: any) {
+  const errors: string[] = [];
+
+  if (!data.user_id) {
+    errors.push('User ID es requerido');
+  } else if (!Number.isInteger(Number(data.user_id))) {
+    errors.push('User ID debe ser un número');
+  } else if (Number(data.user_id) < 1) {
+    errors.push('User ID debe ser un número positivo');
+  }
+
+  if (data.credits !== undefined) {
+    if (!Number.isInteger(Number(data.credits))) {
+      errors.push('Créditos debe ser un número entero');
+    }
+  }
+
+  if (data.service && typeof data.service !== 'string') {
+    errors.push('Servicio debe ser texto');
+  }
+
+  return errors;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
@@ -33,7 +58,7 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     console.error('Error fetching users:', error);
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: 'Error al cargar usuarios' },
       { status: 500 }
     );
   }
@@ -42,12 +67,29 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+
+    // Validar
+    const errors = validateUser(body);
+    if (errors.length > 0) {
+      return NextResponse.json(
+        { success: false, error: errors[0], errors },
+        { status: 400 }
+      );
+    }
+
     const { user_id, credits = 0, service = null } = body;
 
-    if (!user_id) {
+    // Verificar si usuario ya existe
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id')
+      .eq('user_id', Number(user_id))
+      .single();
+
+    if (existingUser) {
       return NextResponse.json(
-        { success: false, error: 'User ID es requerido' },
-        { status: 400 }
+        { success: false, error: `Usuario con ID ${user_id} ya existe` },
+        { status: 409 }
       );
     }
 
@@ -77,7 +119,7 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error('Error creating user:', error);
     return NextResponse.json(
-      { success: false, error: error.message || 'Error al crear usuario' },
+      { success: false, error: 'Error al crear usuario' },
       { status: 500 }
     );
   }

@@ -47,6 +47,7 @@ export default function UsersPage() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [newUserId, setNewUserId] = useState('');
   const [newUserCredits, setNewUserCredits] = useState('0');
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
   useEffect(() => {
     fetchUsers();
@@ -97,12 +98,29 @@ export default function UsersPage() {
   };
 
   const handleCreateUser = async () => {
+    const errors: string[] = [];
+
+    // Validar
     if (!newUserId.trim()) {
-      setErrorMessage('El User ID es requerido');
+      errors.push('El User ID es requerido');
+    } else if (!Number.isInteger(Number(newUserId))) {
+      errors.push('El User ID debe ser un número');
+    } else if (Number(newUserId) < 1) {
+      errors.push('El User ID debe ser un número positivo');
+    }
+
+    if (newUserCredits && !Number.isInteger(Number(newUserCredits))) {
+      errors.push('Los créditos deben ser un número entero');
+    }
+
+    if (errors.length > 0) {
+      setValidationErrors(errors);
+      setErrorMessage('Por favor corrige los errores');
       return;
     }
 
     try {
+      setValidationErrors([]);
       const response = await fetch('/api/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -119,13 +137,18 @@ export default function UsersPage() {
         setNewUserId('');
         setNewUserCredits('0');
         setShowCreateDialog(false);
+        setValidationErrors([]);
         setSuccessMessage('Usuario creado correctamente');
         setTimeout(() => setSuccessMessage(''), 3000);
       } else {
         setErrorMessage(result.error || 'Error al crear usuario');
+        if (result.errors) {
+          setValidationErrors(result.errors);
+        }
       }
     } catch (error: any) {
       setErrorMessage(error.message || 'Error al crear usuario');
+      setValidationErrors(['Error al procesar la solicitud']);
     }
   };
 
@@ -181,14 +204,27 @@ export default function UsersPage() {
                 Agrega un nuevo usuario al sistema
               </DialogDescription>
             </DialogHeader>
+            {validationErrors.length > 0 && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <div className="space-y-1">
+                  {validationErrors.map((err, idx) => (
+                    <AlertDescription key={idx}>• {err}</AlertDescription>
+                  ))}
+                </div>
+              </Alert>
+            )}
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-2">User ID (Telegram) *</label>
+                <label className="block text-sm font-medium mb-2">
+                  User ID (Telegram) *
+                </label>
                 <Input
                   value={newUserId}
                   onChange={(e) => setNewUserId(e.target.value)}
                   placeholder="Ej: 123456789"
                   type="number"
+                  className={validationErrors.some(e => e.includes('User ID')) ? 'border-red-500' : ''}
                 />
               </div>
               <div>
@@ -199,13 +235,22 @@ export default function UsersPage() {
                   placeholder="0"
                   type="number"
                   defaultValue="0"
+                  min="0"
                 />
               </div>
               <div className="flex gap-2 justify-end">
-                <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowCreateDialog(false);
+                    setValidationErrors([]);
+                  }}
+                >
                   Cancelar
                 </Button>
-                <Button onClick={handleCreateUser}>Crear Usuario</Button>
+                <Button onClick={handleCreateUser} disabled={!newUserId.trim()}>
+                  Crear Usuario
+                </Button>
               </div>
             </div>
           </DialogContent>
