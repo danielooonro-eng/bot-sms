@@ -1,93 +1,146 @@
+// =====================================
+// BOT TELEGRAM + 5SIM PRO FINAL (FIX PHONE + ADMIN) + NOTIFICACIONES
+// =====================================
+
+require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
+const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 
-// ==================== CONFIGURACIÓN ====================
-const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
-const FIVESIM_API = process.env.FIVESIM_API;
+const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { polling: true });
 
-// Validar variables de entorno
-if (!TELEGRAM_TOKEN) throw new Error('❌ Error: Faltan TELEGRAM_TOKEN en .env');
-if (!SUPABASE_URL) throw new Error('❌ Error: Falta SUPABASE_URL en .env');
-if (!SUPABASE_ANON_KEY) throw new Error('❌ Error: Falta SUPABASE_ANON_KEY en .env');
+const API_KEY = process.env.FIVESIM_API;
+const BASE_URL = 'https://5sim.net/v1/user';
 
-// Inicializar
-const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// 🔥 TU ID FIJO
+const ADMIN_ID = 8349475987;
 
-console.log('🐣 LittlePay Bot corriendo con Supabase...');
+// Ruta de la imagen de bienvenida (colócala junto al bot.js con el nombre welcome.png)
+const WELCOME_IMAGE = path.join(__dirname, 'welcome.png');
 
-// ==================== FUNCIONES AUXILIARES ====================
+// =============================
+// INICIALIZACIÓN SUPABASE
+// =============================
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_ANON_KEY
+);
 
-/**
- * Obtener usuario de Supabase
- */
-async function getUser(userId) {
+// =============================
+// PERSISTENCIA EN ARCHIVO JSON
+// =============================
+const DB_PATH = path.join(__dirname, 'users.json');
+
+function loadUsers() {
   try {
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
-
-    if (error && error.code !== 'PGRST116') throw error;
-    return data || null;
-  } catch (error) {
-    console.error('Error obteniendo usuario:', error);
-    return null;
-  }
-}
-
-/**
- * Registrar nuevo usuario
- */
-async function registerUser(userId) {
-  try {
-    const { data, error } = await supabase
-      .from('users')
-      .insert([
-        {
-          user_id: userId,
-          credits: 0,
-          created_at: new Date().toISOString(),
-        },
-      ])
-      .select()
-      .single();
-
-    if (error) throw error;
-    console.log(`👤 Nuevo usuario registrado: ${userId}`);
-    return data;
-  } catch (error) {
-    console.error('Error registrando usuario:', error);
-    return null;
-  }
-}
-
-/**
- * Obtener todos los usuarios para notificaciones
- */
-async function getAllUsers(onlyWithCredits = false) {
-  try {
-    let query = supabase.from('users').select('*');
-
-    if (onlyWithCredits) {
-      query = query.gt('credits', 0);
+    if (fs.existsSync(DB_PATH)) {
+      const raw = fs.readFileSync(DB_PATH, 'utf8');
+      const obj = JSON.parse(raw);
+      return new Map(Object.entries(obj).map(([k, v]) => [parseInt(k), v]));
     }
+  } catch (err) {
+    console.error('Error cargando users.json:', err.message);
+  }
+  return new Map();
+}
 
-    const { data, error } = await query;
-
-    if (error) throw error;
-    return data || [];
-  } catch (error) {
-    console.error('Error obteniendo usuarios:', error);
-    return [];
+function saveUsers() {
+  try {
+    const obj = {};
+    for (const [k, v] of users.entries()) {
+      obj[k] = v;
+    }
+    fs.writeFileSync(DB_PATH, JSON.stringify(obj, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Error guardando users.json:', err.message);
   }
 }
 
+const users = loadUsers();
+
+// Limpiar órdenes activas al arrancar (por si el bot se apagó con una en curso)
+async function cancelPendingOrders() {
+  let cancelled = 0;
+  for (const [id, user] of users.entries()) {
+    if (user.orderId) {
+      try {
+        await axios.get(`${BASE_URL}/cancel/${user.orderId}`, {
+          headers: { Authorization: `Bearer ${process.env.FIVESIM_API}` }
+        });
+        user.credits++;
+        user.history.push('+1 crédito (cancelado al reiniciar bot)');
+        console.log(`Orden ${user.orderId} del usuario ${id} cancelada`);
+        cancelled++;
+      } catch {
+        console.log(`No se pudo cancelar orden ${user.orderId} del usuario ${id} en 5sim`);
+      }
+      user.orderId = null;
+      user.messageId = null;
+    }
+  }
+  if (cancelled > 0) saveUsers();
+  console.log(`Ordenes pendientes canceladas al arrancar: ${cancelled}`);
+}
+
+cancelPendingOrders();
+
+function getUser(id) {
+  if (!users.has(id)) {
+    users.set(id, {
+      credits: 0,
+      orderId: null,
+      history: [],
+      service: null
+    });
+    saveUsers();
+  }
+  return users.get(id);
+}
+
+const SERVICES = {
+  amazon:    { emoji: '🛒', countries: ['usa'] },
+  telegram:  { emoji: '✈️', countries: ['usa'] },
+  whatsapp:  { emoji: '💬', countries: ['canada', 'indonesia'] },
+  google:    { emoji: '🔍', countries: ['mexico', 'usa', 'indonesia'] },
+  aliexpress:{ emoji: '🛍️', countries: ['mexico', 'usa', 'canada'] },
+  shein:     { emoji: '👗', countries: ['england', 'usa'] },
+  uber:      { emoji: '🚗', countries: ['mexico', 'usa'] }
+};
+
+const PRICES = {
+  amazon:    { usa: 8 },
+  telegram:  { usa: 15 },
+  whatsapp:  { canada: 12, indonesia: 10 },
+  google:    { mexico: 8, usa: 10, indonesia: 6 },
+  aliexpress:{ mexico: 10, usa: 8, canada: 8 },
+  shein:     { england: 10, usa: 8 },
+  uber:      { mexico: 10, usa: 8 }
+};
+
+const COUNTRY_FLAGS = {
+  usa:       '🇺🇸 USA',
+  mexico:    '🇲🇽 México',
+  canada:    '🇨🇦 Canadá',
+  indonesia: '🇮🇩 Indonesia',
+  england:   '🇬🇧 England'
+};
+
+// Operadores específicos por servicio y país (el resto usa 'any')
+const OPERATORS = {
+  telegram:  { usa: 'virtual63' },
+  aliexpress:{ usa: 'virtual51' },
+  shein:     { england: 'virtual60', usa: 'virtual8' },
+  uber:      { usa: 'virtual63' }
+};
+
+// =============================
+// FUNCIONES DE NOTIFICACIONES (NUEVO)
+// =============================
+
 /**
- * Obtener notificaciones no enviadas
+ * Obtiene todas las notificaciones no enviadas (sent=false)
  */
 async function getUnsentNotifications() {
   try {
@@ -97,67 +150,79 @@ async function getUnsentNotifications() {
       .eq('sent', false)
       .order('created_at', { ascending: true });
 
-    if (error) throw error;
+    if (error) {
+      console.error('Error obteniendo notificaciones:', error);
+      return [];
+    }
+
     return data || [];
-  } catch (error) {
-    console.error('Error obteniendo notificaciones:', error);
+  } catch (err) {
+    console.error('Error en getUnsentNotifications:', err);
     return [];
   }
 }
 
 /**
- * Marcar notificación como enviada
+ * Marca una notificación como enviada
  */
 async function markNotificationAsSent(notificationId) {
   try {
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('notifications')
       .update({
         sent: true,
-        sent_at: new Date().toISOString(),
+        sent_at: new Date().toISOString()
       })
-      .eq('id', notificationId)
-      .select();
+      .eq('id', notificationId);
 
     if (error) {
-      console.error(`❌ Error marcando notificación ${notificationId}:`, error);
+      console.error('Error marcando notificación como enviada:', error);
       return false;
     }
 
-    console.log(`✅ Notificación ${notificationId} marcada como enviada`);
     return true;
-  } catch (error) {
-    console.error('Error en markNotificationAsSent:', error);
+  } catch (err) {
+    console.error('Error en markNotificationAsSent:', err);
     return false;
   }
 }
 
 /**
- * Enviar notificación a usuario
+ * Envía una notificación a un usuario específico
  */
-async function sendNotificationToUser(userId, title, message, type = 'info') {
+async function sendNotificationToUser(userId, notification) {
   try {
-    const typeEmojis = {
-      info: 'ℹ️',
-      warning: '⚠️',
-      success: '✅',
-      error: '❌',
+    let caption = `📬 *Notificación*\n━━━━━━━━━━━━\n`;
+
+    if (notification.title) {
+      caption += `*${notification.title}*\n`;
+    }
+
+    if (notification.message) {
+      caption += `${notification.message}`;
+    }
+
+    const keyboard = {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🏠 Ir al inicio', callback_data: 'start' }]
+        ]
+      },
+      parse_mode: 'Markdown'
     };
 
-    const emoji = typeEmojis[type] || 'ℹ️';
-    const fullMessage = `${emoji} *${title}*\n\n${message}`;
-
-    await bot.sendMessage(userId, fullMessage, { parse_mode: 'Markdown' });
-    console.log(`✅ Notificación enviada a usuario ${userId}`);
+    // Intentar enviar el mensaje
+    await bot.sendMessage(userId, caption, keyboard);
+    console.log(`✅ Notificación enviada al usuario ${userId}`);
     return true;
-  } catch (error) {
-    console.error(`Error enviando notificación a ${userId}:`, error.message);
+  } catch (err) {
+    console.error(`❌ Error enviando notificación al usuario ${userId}:`, err.message);
     return false;
   }
 }
 
 /**
- * Procesar y enviar notificaciones pendientes
+ * Procesa todas las notificaciones pendientes
  */
 async function processNotifications() {
   try {
@@ -167,370 +232,477 @@ async function processNotifications() {
       return;
     }
 
-    console.log(`📬 Procesando ${notifications.length} notificación(es) pendiente(s)...`);
+    console.log(`📨 Procesando ${notifications.length} notificación(es)...`);
 
     for (const notification of notifications) {
-      // Determinar si filtrar por créditos
-      const onlyWithCredits = notification.recipient_type === 'users';
-      const users = await getAllUsers(onlyWithCredits);
+      let recipientIds = [];
 
-      if (users.length === 0) {
-        console.log(`⚠️ No hay usuarios para notificación ID ${notification.id}`);
-        await markNotificationAsSent(notification.id);
-        continue;
+      // Determinar a quién enviar según recipient_type
+      if (notification.recipient_type === 'all') {
+        // Enviar a todos los usuarios en users.json
+        recipientIds = Array.from(users.keys());
+      } else if (notification.recipient_type === 'admin') {
+        // Enviar solo al admin
+        recipientIds = [ADMIN_ID];
+      } else if (notification.recipient_type === 'specific' && notification.user_ids) {
+        // Enviar a usuarios específicos (si user_ids es un array o string)
+        if (Array.isArray(notification.user_ids)) {
+          recipientIds = notification.user_ids;
+        } else if (typeof notification.user_ids === 'string') {
+          try {
+            recipientIds = JSON.parse(notification.user_ids);
+            if (!Array.isArray(recipientIds)) {
+              recipientIds = [recipientIds];
+            }
+          } catch {
+            // Si no es JSON válido, intentar parsearlo como ID único
+            recipientIds = [parseInt(notification.user_ids)];
+          }
+        }
       }
 
-      let sentCount = 0;
-
-      // Enviar a cada usuario
-      for (const user of users) {
-        const success = await sendNotificationToUser(
-          user.user_id,
-          notification.title,
-          notification.message,
-          notification.type
-        );
-
-        if (success) sentCount++;
-
-        // Pausa para no saturar Telegram
-        await new Promise(resolve => setTimeout(resolve, 150));
+      // Enviar a cada recipiente
+      for (const userId of recipientIds) {
+        const sent = await sendNotificationToUser(userId, notification);
+        if (!sent) {
+          console.warn(`⚠️ No se pudo enviar notificación a usuario ${userId}`);
+        }
       }
 
-      // Marcar como enviada DESPUÉS de enviar a todos
-      await markNotificationAsSent(notification.id);
-      console.log(`✅ Notificación ID ${notification.id} enviada a ${sentCount}/${users.length} usuarios`);
+      // Marcar notificación como enviada
+      const marked = await markNotificationAsSent(notification.id);
+      if (marked) {
+        console.log(`✅ Notificación ${notification.id} marcada como enviada`);
+      }
     }
-  } catch (error) {
-    console.error('Error procesando notificaciones:', error);
+  } catch (err) {
+    console.error('Error en processNotifications:', err);
   }
 }
 
-// ==================== COMANDOS DEL BOT ====================
-
+// =============================
+// START
+// =============================
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
-  const userId = msg.from.id;
+  const user = getUser(chatId);
   const firstName = msg.from.first_name || 'Usuario';
 
-  try {
-    // Registrar o obtener usuario
-    let user = await getUser(userId);
-    if (!user) {
-      user = await registerUser(userId);
-    }
+  const caption =
+    `👋 ¡Hola, *${firstName}*! Bienvenido a *LittlePay* 🐣\n\n` +
+    `💰 Créditos disponibles: *${user.credits}*\n\n` +
+    `_Selecciona una opción para continuar:_`;
 
-    const message = `
-🎉 *¡Bienvenido a LittlePay, ${firstName}!*
-
-Soy tu bot asistente para comprar números de teléfono y recibir SMS de forma rápida y segura.
-
-💰 *Tu saldo actual:* $${user?.credits || 0}
-
-¿Qué quieres hacer?
-    `;
-
-    const options = {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: '📱 Comprar Número', callback_data: 'buy_number' },
-            { text: '💰 Ver Saldo', callback_data: 'check_balance' },
-          ],
-          [
-            { text: '📜 Historial', callback_data: 'view_history' },
-            { text: '❓ Ayuda', callback_data: 'help' },
-          ],
-        ],
-      },
-      parse_mode: 'Markdown',
-    };
-
-    await bot.sendMessage(chatId, message, options);
-  } catch (error) {
-    console.error('Error en /start:', error);
-    await bot.sendMessage(
-      chatId,
-      '❌ Hubo un error. Por favor, intenta más tarde.'
-    );
-  }
-});
-
-bot.onText(/\/balance/, async (msg) => {
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
-
-  try {
-    let user = await getUser(userId);
-    if (!user) {
-      user = await registerUser(userId);
-    }
-
-    const message = `
-💰 *Tu Saldo*
-
-Balance disponible: *$${user?.credits || 0}*
-
-¿Quieres comprar más créditos?
-    `;
-
-    const options = {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '➕ Comprar Créditos', callback_data: 'buy_credits' }],
-          [{ text: '🔙 Volver al Menú', callback_data: 'back_menu' }],
-        ],
-      },
-      parse_mode: 'Markdown',
-    };
-
-    await bot.sendMessage(chatId, message, options);
-  } catch (error) {
-    console.error('Error en /balance:', error);
-    await bot.sendMessage(chatId, '❌ Error al obtener tu saldo.');
-  }
-});
-
-bot.onText(/\/help/, async (msg) => {
-  const chatId = msg.chat.id;
-
-  const message = `
-❓ *Ayuda - LittlePay*
-
-*📚 Guía de uso:*
-
-1️⃣ *Comprar Número*
-   Selecciona el país y servicio que necesitas
-
-2️⃣ *Recibir SMS*
-   El código llegará directamente a tu bot
-
-3️⃣ *Ver Historial*
-   Consulta todos tus números y mensajes
-
-4️⃣ *Soporte*
-   Si tienes problemas, contacta al administrador
-
-*Comandos disponibles:*
-/start - Menú principal
-/balance - Ver saldo
-/help - Esta ayuda
-    `;
-
-  const options = {
+  const keyboard = {
     reply_markup: {
       inline_keyboard: [
-        [{ text: '🔙 Volver al Menú', callback_data: 'back_menu' }],
-      ],
+        [{ text: '📱  Comprar número', callback_data: 'buy' }],
+        [{ text: '👤  Mi perfil',      callback_data: 'perfil' }]
+      ]
     },
-    parse_mode: 'Markdown',
+    parse_mode: 'Markdown'
   };
 
-  await bot.sendMessage(chatId, message, options);
-});
-
-// ==================== BOTONES INLINE ====================
-
-bot.on('callback_query', async (query) => {
-  const chatId = query.message.chat.id;
-  const userId = query.from.id;
-  const action = query.data;
-
-  try {
-    switch (action) {
-      case 'check_balance': {
-        const user = await getUser(userId);
-        const message = `
-💰 *Tu Saldo Actual*
-
-Balance: *$${user?.credits || 0}*
-Teléfonos activos: *${0}*
-
-¿Quieres hacer algo más?
-        `;
-
-        const options = {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '📱 Comprar Número', callback_data: 'buy_number' }],
-              [{ text: '🔙 Volver', callback_data: 'back_menu' }],
-            ],
-          },
-          parse_mode: 'Markdown',
-        };
-
-        await bot.editMessageText(message, {
-          chat_id: chatId,
-          message_id: query.message.message_id,
-          ...options,
-        });
-        break;
-      }
-
-      case 'buy_number': {
-        const message = `
-📱 *Comprar Número*
-
-Selecciona el país:
-        `;
-
-        const options = {
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: '🇲🇽 México', callback_data: 'country_mx' },
-                { text: '🇺🇸 USA', callback_data: 'country_us' },
-              ],
-              [
-                { text: '🇪🇸 España', callback_data: 'country_es' },
-                { text: '🇦🇷 Argentina', callback_data: 'country_ar' },
-              ],
-              [{ text: '🔙 Volver', callback_data: 'back_menu' }],
-            ],
-          },
-          parse_mode: 'Markdown',
-        };
-
-        await bot.editMessageText(message, {
-          chat_id: chatId,
-          message_id: query.message.message_id,
-          ...options,
-        });
-        break;
-      }
-
-      case 'view_history': {
-        const message = `
-📜 *Tu Historial*
-
-No tienes números activos aún.
-
-Compra tu primer número para empezar.
-        `;
-
-        const options = {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '📱 Comprar Número', callback_data: 'buy_number' }],
-              [{ text: '🔙 Volver', callback_data: 'back_menu' }],
-            ],
-          },
-          parse_mode: 'Markdown',
-        };
-
-        await bot.editMessageText(message, {
-          chat_id: chatId,
-          message_id: query.message.message_id,
-          ...options,
-        });
-        break;
-      }
-
-      case 'help': {
-        const message = `
-❓ *Ayuda y Soporte*
-
-*Preguntas frecuentes:*
-
-🔸 ¿Cómo compro un número?
-   Ve a Comprar Número y selecciona el país
-
-🔸 ¿Cuánto cuesta?
-   Desde $1 USD por número
-
-🔸 ¿Los números son reutilizables?
-   No, cada número es de un solo uso
-
-¿Necesitas más ayuda?
-Contacta al administrador.
-        `;
-
-        const options = {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '🔙 Volver', callback_data: 'back_menu' }],
-            ],
-          },
-          parse_mode: 'Markdown',
-        };
-
-        await bot.editMessageText(message, {
-          chat_id: chatId,
-          message_id: query.message.message_id,
-          ...options,
-        });
-        break;
-      }
-
-      case 'back_menu': {
-        const user = await getUser(userId);
-        const message = `
-🎉 *Menú Principal*
-
-💰 *Tu saldo:* $${user?.credits || 0}
-
-¿Qué quieres hacer?
-        `;
-
-        const options = {
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: '📱 Comprar', callback_data: 'buy_number' },
-                { text: '💰 Saldo', callback_data: 'check_balance' },
-              ],
-              [
-                { text: '📜 Historial', callback_data: 'view_history' },
-                { text: '❓ Ayuda', callback_data: 'help' },
-              ],
-            ],
-          },
-          parse_mode: 'Markdown',
-        };
-
-        await bot.editMessageText(message, {
-          chat_id: chatId,
-          message_id: query.message.message_id,
-          ...options,
-        });
-        break;
-      }
-
-      default:
-        // Responder otros botones
-        await bot.answerCallbackQuery(query.id, {
-          text: '⏳ Función en desarrollo...',
-          show_alert: false,
-        });
-    }
-
-    // Responder callback
-    await bot.answerCallbackQuery(query.id);
-  } catch (error) {
-    console.error('Error en callback_query:', error);
-    await bot.answerCallbackQuery(query.id, {
-      text: '❌ Error al procesar tu solicitud',
-      show_alert: true,
-    });
+  if (fs.existsSync(WELCOME_IMAGE)) {
+    bot.sendPhoto(chatId, WELCOME_IMAGE, { caption, ...keyboard });
+  } else {
+    bot.sendMessage(chatId, caption, keyboard);
   }
 });
 
-// ==================== MANEJO DE ERRORES ====================
+// =============================
+// PERFIL
+// =============================
+function sendProfile(chatId) {
+  const user = getUser(chatId);
 
-bot.on('polling_error', (error) => {
-  console.error('error:', error);
+  const historyText = user.history.length > 0
+    ? user.history.slice(-5).map(h => `  ▸ ${h}`).join('\n')
+    : '  _Sin movimientos aún_';
+
+  const text =
+    `👤 *Tu Perfil*\n` +
+    `━━━━━━━━━━━━━━━━━━\n` +
+    `🆔 ID: \`${chatId}\`\n` +
+    `💰 Créditos: *${user.credits}*\n` +
+    `📦 Orden activa: ${user.orderId ? `\`${user.orderId}\`` : '_Ninguna_'}\n\n` +
+    `📜 *Últimos movimientos:*\n${historyText}`;
+
+  bot.sendMessage(chatId, text, {
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🏠  Inicio', callback_data: 'start' }]
+      ]
+    }
+  });
+}
+
+bot.onText(/\/perfil/, (msg) => sendProfile(msg.chat.id));
+
+// =============================
+// ADMIN CREDITOS
+// =============================
+bot.onText(/\/addcredits (\d+) (\d+)/, (msg, match) => {
+  if (msg.from.id !== ADMIN_ID) return;
+
+  const userId = parseInt(match[1]);
+  const amount = parseInt(match[2]);
+
+  const user = getUser(userId);
+  user.credits += amount;
+  user.history.push(`+${amount} créditos (admin)`);
+  saveUsers();
+
+  bot.sendMessage(msg.chat.id, `✅ *${amount} créditos* agregados al usuario \`${userId}\``, { parse_mode: 'Markdown' });
+  bot.sendMessage(userId, `🎉 Recibiste *${amount} créditos* en LittlePay 🐣`, { parse_mode: 'Markdown' });
 });
 
-bot.on('error', (error) => {
-  console.error('error:', error);
+// =============================
+// HELPERS PARA EDITAR MENSAJES
+// =============================
+
+// Edita el mensaje actual (texto o caption si tiene foto)
+async function editMsg(query, text, reply_markup) {
+  const msg = query.message;
+  const opts = { parse_mode: 'Markdown', reply_markup };
+
+  try {
+    if (msg.photo || msg.document) {
+      await bot.editMessageCaption(text, {
+        chat_id: msg.chat.id,
+        message_id: msg.message_id,
+        ...opts
+      });
+    } else {
+      await bot.editMessageText(text, {
+        chat_id: msg.chat.id,
+        message_id: msg.message_id,
+        ...opts
+      });
+    }
+  } catch (e) {
+    // Mensaje borrado o no encontrado — ignorar
+  }
+}
+
+// =============================
+// BOTONES
+// =============================
+bot.on('callback_query', async (query) => {
+  const chatId = query.message.chat.id;
+  const data = query.data;
+  const user = getUser(chatId);
+
+  bot.answerCallbackQuery(query.id);
+
+  // ── INICIO ──
+  if (data === 'start') {
+    const firstName = query.from.first_name || 'Usuario';
+    const text =
+      `👋 ¡Hola, *${firstName}*! Bienvenido a *LittlePay* 🐣\n\n` +
+      `💰 Créditos disponibles: *${user.credits}*\n\n` +
+      `_Selecciona una opción para continuar:_`;
+
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '📱  Comprar número', callback_data: 'buy' }],
+        [{ text: '👤  Mi perfil',      callback_data: 'perfil' }]
+      ]
+    };
+
+    return editMsg(query, text, keyboard);
+  }
+
+  // ── PERFIL ──
+  if (data === 'perfil') {
+    const historyText = user.history.length > 0
+      ? user.history.slice(-5).map(h => `  ▸ ${h}`).join('\n')
+      : '  _Sin movimientos aún_';
+
+    const text =
+      `👤 *Tu Perfil*\n` +
+      `━━━━━━━━━━━━━━━━━━\n` +
+      `🆔 ID: \`${chatId}\`\n` +
+      `💰 Créditos: *${user.credits}*\n` +
+      `📦 Orden activa: ${user.orderId ? `\`${user.orderId}\`` : '_Ninguna_'}\n\n` +
+      `📜 *Últimos movimientos:*\n${historyText}`;
+
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '🏠  Inicio', callback_data: 'start' }]
+      ]
+    };
+
+    return editMsg(query, text, keyboard);
+  }
+
+  // ── COMPRAR ──
+  if (data === 'buy') {
+    if (user.credits <= 0) {
+      return editMsg(query,
+        `❌ *Sin créditos*\n\nContacta al administrador para recargar tu cuenta.`,
+        { inline_keyboard: [[{ text: '🏠  Inicio', callback_data: 'start' }]] }
+      );
+    }
+
+    const serviceButtons = Object.entries(SERVICES).map(([key, val]) => ([
+      { text: `${val.emoji}  ${key.charAt(0).toUpperCase() + key.slice(1)}`, callback_data: `service_${key}` }
+    ]));
+    // Agrupar botones de 2 en 2 para mejor visual
+    const groupedServiceButtons = [];
+    for (let i = 0; i < serviceButtons.length; i += 2) {
+      groupedServiceButtons.push([...serviceButtons[i], ...(serviceButtons[i+1] || [])]);
+    }
+
+    return editMsg(query,
+      `🛍️ *Selecciona el servicio*\n\n_¿Para qué plataforma necesitas el número?_`,
+      {
+        inline_keyboard: [
+          ...groupedServiceButtons,
+          [{ text: '🔙  Volver', callback_data: 'start' }]
+        ]
+      }
+    );
+  }
+
+  // ── SELECCIÓN DE SERVICIO ──
+  if (data.startsWith('service_')) {
+    const service = data.split('_')[1];
+    user.service = service;
+    saveUsers();
+
+    const { emoji, countries } = SERVICES[service];
+    const servicePrices = PRICES[service] || {};
+    const countryButtons = countries.map(c => ([
+      { text: `${COUNTRY_FLAGS[c] || c.toUpperCase()} — $${servicePrices[c] || '?'}`, callback_data: `country_${c}` }
+    ]));
+
+    return editMsg(query,
+      `${emoji} *${service.charAt(0).toUpperCase() + service.slice(1)}*\n\n🌍 _Selecciona el país del número:_`,
+      {
+        inline_keyboard: [
+          ...countryButtons,
+          [{ text: '🔙  Volver', callback_data: 'buy' }]
+        ]
+      }
+    );
+  }
+
+  // ── COMPRA DE NÚMERO ──
+  if (data.startsWith('country_')) {
+    const country = data.split('_')[1];
+
+    // Bloquear si ya hay una orden en proceso
+    if (user.orderId) {
+      return editMsg(query,
+        `⚠️ *Ya tienes una orden en proceso*\n\nEspera a recibir el código o cancela la orden actual antes de comprar otro número.`,
+        { inline_keyboard: [[{ text: '🏠  Inicio', callback_data: 'start' }]] }
+      );
+    }
+
+    try {
+      const operator = (OPERATORS[user.service]?.[country]) || 'any';
+      const res = await axios.get(
+        `${BASE_URL}/buy/activation/${country}/${operator}/${user.service}`,
+        { headers: { Authorization: `Bearer ${API_KEY}` } }
+      );
+
+      const order = res.data;
+      const phone = order.phone || order.number || null;
+
+      if (!phone) {
+        return editMsg(query,
+          `❌ No hay números disponibles para *${COUNTRY_FLAGS[country] || country}* en este momento.`,
+          { inline_keyboard: [[{ text: '🔙  Volver', callback_data: 'buy' }]] }
+        );
+      }
+
+      const price = (PRICES[user.service] || {})[country] || '?';
+      user.orderId = order.id;
+      user.messageId = query.message.message_id;
+      user.hasPhoto = !!(query.message.photo || query.message.document);
+      user.credits--;
+      user.history.push(`-1 crédito | ${user.service} (${country}) $${price}`);
+      saveUsers();
+
+      await editMsg(query,
+        `✅ *Número asignado*\n` +
+        `━━━━━━━━━━━━━━━━━━\n` +
+        `📱 Número: \`${phone}\`\n` +
+        `🌍 País: ${COUNTRY_FLAGS[country] || country}\n` +
+        `💵 Precio: *$${price}*\n` +
+        `💰 Créditos restantes: *${user.credits}*\n\n` +
+        `⏳ _Esperando el código SMS..._`,
+        {
+          inline_keyboard: [
+            [{ text: '❌  Cancelar y devolver crédito', callback_data: 'cancel' }]
+          ]
+        }
+      );
+
+      waitForSMS(chatId, order.id);
+
+    } catch (err) {
+      editMsg(query,
+        `⚠️ *Error al obtener número*\n\n_${err.response?.data?.message || 'Servicio no disponible'}_`,
+        { inline_keyboard: [[{ text: '🔙  Volver', callback_data: 'buy' }]] }
+      );
+    }
+  }
+
+  // ── CANCELAR ──
+  if (data === 'cancel') {
+    if (!user.orderId) return;
+
+    try {
+      await axios.get(`${BASE_URL}/cancel/${user.orderId}`, {
+        headers: { Authorization: `Bearer ${API_KEY}` }
+      });
+
+      user.credits++;
+      user.history.push('+1 crédito (cancelado)');
+      user.orderId = null;
+      saveUsers();
+
+      editMsg(query,
+        `🔄 *Orden cancelada*\n\nTu crédito ha sido devuelto. Créditos actuales: *${user.credits}*`,
+        { inline_keyboard: [[{ text: '🏠  Inicio', callback_data: 'start' }]] }
+      );
+    } catch {
+      editMsg(query,
+        `⚠️ Error al cancelar la orden. Intenta de nuevo.`,
+        { inline_keyboard: [[{ text: '🏠  Inicio', callback_data: 'start' }]] }
+      );
+    }
+  }
 });
 
-// ==================== TAREA DE NOTIFICACIONES ====================
+// =============================
+// EXTRAER CÓDIGO DEL TEXTO DEL SMS
+// =============================
+// Intenta sacar un código numérico del texto completo del SMS
+function extractCode(text) {
+  if (!text) return null;
+  // Busca secuencias de 4-8 dígitos (cubre la mayoría de OTPs)
+  const match = text.match(/\b(\d{4,8})\b/);
+  return match ? match[1] : null;
+}
 
-// Procesar notificaciones cada 30 segundos
+// =============================
+// ESPERAR SMS
+// =============================
+async function waitForSMS(chatId, orderId) {
+  let attempts = 0;
+
+  // Edita el mensaje guardado en user, ignorando errores si fue borrado
+  async function editSmsMsg(text, keyboard) {
+    const user = getUser(chatId);
+    if (!user.messageId) return;
+
+    const opts = {
+      chat_id: chatId,
+      message_id: user.messageId,
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: keyboard }
+    };
+
+    try {
+      if (user.hasPhoto) {
+        await bot.editMessageCaption(text, opts);
+      } else {
+        await bot.editMessageText(text, opts);
+      }
+    } catch (e) {
+      // Mensaje borrado o ya editado — ignorar silenciosamente
+    }
+  }
+
+  const interval = setInterval(async () => {
+    const user = getUser(chatId);
+
+    // Si la orden fue cancelada manualmente, detener
+    if (!user.orderId) {
+      clearInterval(interval);
+      return;
+    }
+
+    try {
+      const res = await axios.get(`${BASE_URL}/check/${orderId}`, {
+        headers: { Authorization: `Bearer ${API_KEY}` }
+      });
+
+      const data = res.data;
+
+      // LOG para depuración — ver qué devuelve 5sim
+      console.log(`[SMS Check] orderId=${orderId} status=${data.status} sms=${JSON.stringify(data.sms)}`);
+
+      if (data.sms && data.sms.length > 0) {
+        const sms = data.sms[0];
+        // 5sim puede devolver el código en .code o dentro del texto en .text
+        const code = sms.code || extractCode(sms.text) || sms.text || 'No detectado';
+        console.log(`[SMS] Código extraído: ${code} | raw:`, sms);
+
+        user.history.push(`Código: ${code}`);
+        user.orderId = null;
+        user.messageId = null;
+        saveUsers();
+        clearInterval(interval);
+
+        await editSmsMsg(
+          `🎉 *¡Código recibido!*\n` +
+          `━━━━━━━━━━━━━━━━━━\n` +
+          `🔐 Código: \`${code}\``,
+          [[{ text: '🏠  Inicio', callback_data: 'start' }]]
+        );
+        return;
+      }
+
+      attempts++;
+
+      // Timeout: 20 minutos (240 intentos x 5 seg)
+      if (attempts >= 240) {
+        clearInterval(interval);
+
+        try {
+          await axios.get(`${BASE_URL}/cancel/${orderId}`, {
+            headers: { Authorization: `Bearer ${API_KEY}` }
+          });
+          user.credits++;
+          user.history.push('+1 crédito (timeout 20min)');
+        } catch { /* si falla la cancelación en 5sim, no devolver crédito */ }
+
+        user.orderId = null;
+        user.messageId = null;
+        saveUsers();
+
+        await editSmsMsg(
+          `⌛ *Tiempo agotado (20 min)*\n\nNo se recibió ningún código. La orden fue cancelada y tu crédito fue devuelto.`,
+          [[{ text: '🏠  Inicio', callback_data: 'start' }]]
+        );
+      }
+
+    } catch (err) {
+      // Error en el check — no cortar el intervalo, reintentar en el siguiente ciclo
+      console.log(`[SMS Check ERROR] orderId=${orderId}`, err?.response?.data || err.message);
+    }
+  }, 5000);
+}
+
+// =============================
+// INICIO DEL BOT
+// =============================
+console.log('🐣 LittlePay Bot corriendo...');
+console.log('📨 Sistema de notificaciones activado - Revisando cada 30 segundos');
+
+// Iniciar el procesamiento de notificaciones cada 30 segundos
 setInterval(processNotifications, 30000);
 
-// Procesar una vez al iniciar
+// Ejecutar la primera vez inmediatamente
 processNotifications();
 
-console.log('✅ Sistema de notificaciones iniciado (cada 30 segundos)');
+// .env
+// TELEGRAM_TOKEN=TU_TOKEN
+// FIVESIM_API=TU_API_KEY
+// SUPABASE_URL=TU_SUPABASE_URL
+// SUPABASE_ANON_KEY=TU_SUPABASE_ANON_KEY
