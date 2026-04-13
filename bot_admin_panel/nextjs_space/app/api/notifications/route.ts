@@ -1,42 +1,84 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getSession } from '@/lib/auth'
-import { successResponse } from '@/lib/api-utils'
-import { Notification } from '@/lib/types'
+import { createClient } from '@supabase/supabase-js';
+import { NextRequest, NextResponse } from 'next/server';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
+);
 
 export async function GET(request: NextRequest) {
   try {
-    // Verify session
-    const session = await getSession()
-    if (!session) {
-      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (error) throw error;
+
+    return NextResponse.json({
+      success: true,
+      data: data || [],
+      count: data?.length || 0,
+    });
+  } catch (error: any) {
+    console.error('Error fetching notifications:', error);
+    return NextResponse.json(
+      { success: false, error: error.message },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { title, message, type = 'info', recipient_type = 'all', user_ids = null } = body;
+
+    // Validaciones
+    if (!title || !message) {
+      return NextResponse.json(
+        { success: false, error: 'Título y mensaje son requeridos' },
+        { status: 400 }
+      );
     }
 
-    const searchParams = request.nextUrl.searchParams
-    const limit = parseInt(searchParams.get('limit') || '50')
+    if (title.trim().length === 0 || message.trim().length === 0) {
+      return NextResponse.json(
+        { success: false, error: 'Título y mensaje no pueden estar vacíos' },
+        { status: 400 }
+      );
+    }
 
-    // TODO: Fetch from Supabase
-    // For now, return mock data
-    const notifications: Notification[] = [
+    const { data, error } = await supabase
+      .from('notifications')
+      .insert([
+        {
+          title: title.trim(),
+          message: message.trim(),
+          type,
+          recipient_type,
+          user_ids,
+          created_at: new Date().toISOString(),
+        },
+      ])
+      .select();
+
+    if (error) throw error;
+
+    return NextResponse.json(
       {
-        id: '1',
-        recipient_id: '8349475987',
-        message: 'Tu cuenta ha recibido 50 créditos gratis',
-        title: 'Créditos gratis',
-        is_sent: true,
-        sent_at: new Date('2024-04-10T12:00:00'),
-        created_at: new Date('2024-04-10T12:00:00'),
-        created_by: 'admin',
+        success: true,
+        message: 'Notificación enviada correctamente',
+        data: data?.[0],
       },
-    ].slice(0, limit)
-
+      { status: 201 }
+    );
+  } catch (error: any) {
+    console.error('Error creating notification:', error);
     return NextResponse.json(
-      successResponse(notifications, 'Notifications retrieved successfully')
-    )
-  } catch (error) {
-    console.error('Error fetching notifications:', error)
-    return NextResponse.json(
-      { success: false, error: 'Internal server error' },
+      { success: false, error: error.message || 'Error al enviar notificación' },
       { status: 500 }
-    )
+    );
   }
 }

@@ -1,273 +1,270 @@
-'use client'
+'use client';
 
-import { useState, useEffect } from 'react'
-import { Card } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select'
-import {
-  Search,
-  Send,
-  Clock,
-  CheckCircle,
-} from 'lucide-react'
-import { Notification } from '@/lib/types'
-import toast from 'react-hot-toast'
-import dynamic from 'next/dynamic'
+} from '@/components/ui/select';
+import { AlertCircle, CheckCircle, Loader2, Send, Trash2 } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
-const Textarea = dynamic(() => import('@/components/ui/textarea').then(m => m.Textarea), {
-  ssr: false,
-  loading: () => <input className="w-full px-3 py-2 border border-slate-600 rounded-md bg-slate-700 text-white" />
-})
-
-interface NotificationWithStatus extends Notification {
-  recipient_name?: string
+interface Notification {
+  id: number;
+  title: string;
+  message: string;
+  type: string;
+  created_at: string;
+  recipient_type: string;
 }
 
 export default function NotificationsPage() {
-  const [notifications, setNotifications] = useState<NotificationWithStatus[]>([])
-  const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
-  
-  // Form state
-  const [recipientId, setRecipientId] = useState('')
-  const [sendToAll, setSendToAll] = useState(false)
-  const [title, setTitle] = useState('')
-  const [message, setMessage] = useState('')
-  const [sending, setSending] = useState(false)
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [formLoading, setFormLoading] = useState(false);
+  const [title, setTitle] = useState('');
+  const [message, setMessage] = useState('');
+  const [type, setType] = useState('info');
+  const [recipientType, setRecipientType] = useState('all');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
 
+  // Cargar notificaciones
   useEffect(() => {
-    fetchNotifications()
-  }, [])
+    fetchNotifications();
+  }, []);
 
   const fetchNotifications = async () => {
     try {
-      const response = await fetch('/api/notifications?limit=50')
-      const data = await response.json()
+      setLoading(true);
+      const response = await fetch('/api/notifications');
+      const result = await response.json();
 
-      if (data.success) {
-        setNotifications(data.data)
+      if (result.success) {
+        setNotifications(result.data || []);
       }
     } catch (error) {
-      console.error('Error fetching notifications:', error)
-      toast.error('Error cargando notificaciones')
+      console.error('Error fetching notifications:', error);
+      setErrorMessage('Error al cargar notificaciones');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
-  const handleSendNotification = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // Validaciones
+    if (!title.trim()) {
+      setErrorMessage('El título es requerido');
+      return;
+    }
 
     if (!message.trim()) {
-      toast.error('Por favor escribe un mensaje')
-      return
+      setErrorMessage('El mensaje es requerido');
+      return;
     }
 
-    if (!sendToAll && !recipientId) {
-      toast.error('Selecciona un usuario o marca "Enviar a todos"')
-      return
-    }
-
-    setSending(true)
     try {
-      const response = await fetch('/api/notifications/send', {
+      setFormLoading(true);
+      setErrorMessage('');
+      setSuccessMessage('');
+
+      const response = await fetch('/api/notifications', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          recipient_id: sendToAll ? null : recipientId,
-          title: title || undefined,
-          message,
-          send_to_all: sendToAll,
+          title: title.trim(),
+          message: message.trim(),
+          type,
+          recipient_type: recipientType,
         }),
-      })
+      });
 
-      const data = await response.json()
+      const result = await response.json();
+
+      if (result.success) {
+        setSuccessMessage('¡Notificación enviada correctamente!');
+        setTitle('');
+        setMessage('');
+        setType('info');
+        setRecipientType('all');
+        
+        // Recargar notificaciones
+        setTimeout(() => {
+          fetchNotifications();
+        }, 500);
+      } else {
+        setErrorMessage(result.error || 'Error al enviar notificación');
+      }
+    } catch (error: any) {
+      console.error('Error:', error);
+      setErrorMessage(error.message || 'Error al enviar notificación');
+    } finally {
+      setFormLoading(false);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('¿Estás seguro de que deseas eliminar esta notificación?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/notifications/${id}`, {
+        method: 'DELETE',
+      });
 
       if (response.ok) {
-        toast.success('Notificación enviada')
-        setTitle('')
-        setMessage('')
-        setRecipientId('')
-        setSendToAll(false)
-        fetchNotifications()
-      } else {
-        toast.error(data.error || 'Error enviando notificación')
+        setNotifications(notifications.filter(n => n.id !== id));
+        setSuccessMessage('Notificación eliminada');
       }
     } catch (error) {
-      console.error('Error sending notification:', error)
-      toast.error('Error enviando notificación')
-    } finally {
-      setSending(false)
+      console.error('Error deleting notification:', error);
+      setErrorMessage('Error al eliminar notificación');
     }
-  }
-
-  const filteredNotifications = notifications.filter((n) =>
-    n.message.toLowerCase().includes(search.toLowerCase()) ||
-    n.recipient_id?.includes(search)
-  )
+  };
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-white">Notificaciones</h1>
-        <p className="text-slate-400">Envía mensajes a usuarios</p>
-      </div>
+    <div className="space-y-6">
+      <div className="grid gap-6 md:grid-cols-2">
+        {/* Formulario */}
+        <Card className="p-6">
+          <h2 className="text-2xl font-bold mb-6">Enviar Notificación</h2>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Send Form */}
-        <Card className="bg-slate-800 border-slate-700 lg:col-span-1">
-          <div className="p-6">
-            <h2 className="text-lg font-semibold text-white mb-6">Enviar notificación</h2>
+          {errorMessage && (
+            <Alert variant="destructive" className="mb-4">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{errorMessage}</AlertDescription>
+            </Alert>
+          )}
 
-            <form onSubmit={handleSendNotification} className="space-y-4">
-              <div className="space-y-2">
-                <Label className="text-slate-300">Destinatario</Label>
-                <div className="space-y-2">
-                  <Input
-                    placeholder="ID del usuario (Telegram ID)"
-                    value={recipientId}
-                    onChange={(e) => setRecipientId(e.target.value)}
-                    disabled={sendToAll || sending}
-                    className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-500"
-                  />
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={sendToAll}
-                      onChange={(e) => setSendToAll(e.target.checked)}
-                      disabled={sending}
-                      className="rounded"
-                    />
-                    <span className="text-sm text-slate-300">Enviar a todos los usuarios</span>
-                  </label>
-                </div>
-              </div>
+          {successMessage && (
+            <Alert className="mb-4 bg-green-50 border-green-200">
+              <CheckCircle className="h-4 w-4 text-green-600" />
+              <AlertDescription className="text-green-800">{successMessage}</AlertDescription>
+            </Alert>
+          )}
 
-              <div className="space-y-2">
-                <Label htmlFor="title" className="text-slate-300">
-                  Título (opcional)
-                </Label>
-                <Input
-                  id="title"
-                  placeholder="Asunto del mensaje"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  disabled={sending}
-                  className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-500"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="message" className="text-slate-300">
-                  Mensaje
-                </Label>
-                <textarea
-                  id="message"
-                  placeholder="Escribe tu mensaje aquí..."
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  disabled={sending}
-                  rows={5}
-                  className="w-full px-3 py-2 border border-slate-600 rounded-md bg-slate-700 text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-                />
-                <p className="text-xs text-slate-400">
-                  {message.length} caracteres
-                </p>
-              </div>
-
-              <Button
-                type="submit"
-                disabled={sending}
-                className="w-full bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white font-semibold"
-              >
-                <Send className="h-4 w-4 mr-2" />
-                {sending ? 'Enviando...' : 'Enviar notificación'}
-              </Button>
-            </form>
-          </div>
-        </Card>
-
-        {/* Notifications History */}
-        <Card className="bg-slate-800 border-slate-700 lg:col-span-2">
-          <div className="p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-semibold text-white">Historial de notificaciones</h2>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={fetchNotifications}
-                className="text-blue-400 hover:bg-blue-500/10"
-              >
-                Actualizar
-              </Button>
-            </div>
-
-            {/* Search */}
-            <div className="mb-6 relative">
-              <Search className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-2">Título *</label>
               <Input
-                placeholder="Buscar notificaciones..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-10 bg-slate-700 border-slate-600 text-white placeholder:text-slate-500"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Título de la notificación"
+                disabled={formLoading}
               />
             </div>
 
-            {/* Notifications List */}
-            <div className="space-y-4 max-h-96 overflow-y-auto">
-              {filteredNotifications.length > 0 ? (
-                filteredNotifications.map((notification) => (
-                  <div
-                    key={notification.id}
-                    className="p-4 rounded-lg bg-slate-700/50 border border-slate-600/50"
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex-1">
-                        {notification.title && (
-                          <p className="font-semibold text-white text-sm">
-                            {notification.title}
-                          </p>
-                        )}
-                        <p className="text-slate-300 text-sm">
-                          {notification.message}
-                        </p>
-                      </div>
-                      <div className="flex-shrink-0 ml-2">
-                        {notification.is_sent ? (
-                          <CheckCircle className="h-5 w-5 text-green-400" />
-                        ) : (
-                          <Clock className="h-5 w-5 text-yellow-400" />
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between text-xs text-slate-400">
-                      <span>
-                        Para: {notification.recipient_id || 'Todos los usuarios'}
-                      </span>
-                      <span>
-                        {new Date(notification.created_at).toLocaleString('es-MX')}
-                      </span>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="text-center text-slate-400 py-8">
-                  No hay notificaciones que mostrar
-                </p>
-              )}
+            <div>
+              <label className="block text-sm font-medium mb-2">Mensaje *</label>
+              <Textarea
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                placeholder="Contenido del mensaje"
+                className="h-32"
+                disabled={formLoading}
+              />
             </div>
-          </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">Tipo</label>
+                <Select value={type} onValueChange={setType} disabled={formLoading}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="info">ℹ️ Información</SelectItem>
+                    <SelectItem value="warning">⚠️ Advertencia</SelectItem>
+                    <SelectItem value="success">✅ Éxito</SelectItem>
+                    <SelectItem value="error">❌ Error</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">Destinatarios</label>
+                <Select value={recipientType} onValueChange={setRecipientType} disabled={formLoading}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">👥 Todos</SelectItem>
+                    <SelectItem value="admins">🔐 Administradores</SelectItem>
+                    <SelectItem value="users">👤 Usuarios</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <Button 
+              type="submit" 
+              disabled={formLoading || !title.trim() || !message.trim()}
+              className="w-full"
+            >
+              {formLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Enviando...
+                </>
+              ) : (
+                <>
+                  <Send className="h-4 w-4 mr-2" />
+                  Enviar Notificación
+                </>
+              )}
+            </Button>
+          </form>
+        </Card>
+
+        {/* Historial */}
+        <Card className="p-6">
+          <h2 className="text-2xl font-bold mb-6">Historial de Notificaciones</h2>
+
+          {loading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin" />
+            </div>
+          ) : notifications.length === 0 ? (
+            <p className="text-gray-500 text-center py-8">
+              No hay notificaciones aún
+            </p>
+          ) : (
+            <div className="space-y-3 max-h-96 overflow-y-auto">
+              {notifications.map((notif) => (
+                <div
+                  key={notif.id}
+                  className="flex items-start justify-between p-3 border rounded-lg hover:bg-gray-50"
+                >
+                  <div className="flex-1">
+                    <h3 className="font-semibold">{notif.title}</h3>
+                    <p className="text-sm text-gray-600">{notif.message}</p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {new Date(notif.created_at).toLocaleString()}
+                    </p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleDelete(notif.id)}
+                    className="text-red-600 hover:text-red-800"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
       </div>
     </div>
-  )
+  );
 }
