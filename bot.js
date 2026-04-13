@@ -12,7 +12,7 @@ if (!TELEGRAM_TOKEN) throw new Error('❌ Error: Faltan TELEGRAM_TOKEN en .env')
 if (!SUPABASE_URL) throw new Error('❌ Error: Falta SUPABASE_URL en .env');
 if (!SUPABASE_ANON_KEY) throw new Error('❌ Error: Falta SUPABASE_ANON_KEY en .env');
 
-// Inicializar bot y Supabase
+// Inicializar
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -21,7 +21,52 @@ console.log('🐣 LittlePay Bot corriendo con Supabase...');
 // ==================== FUNCIONES AUXILIARES ====================
 
 /**
- * Obtener todos los usuarios de Supabase
+ * Obtener usuario de Supabase
+ */
+async function getUser(userId) {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw error;
+    return data || null;
+  } catch (error) {
+    console.error('Error obteniendo usuario:', error);
+    return null;
+  }
+}
+
+/**
+ * Registrar nuevo usuario
+ */
+async function registerUser(userId) {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .insert([
+        {
+          user_id: userId,
+          credits: 0,
+          created_at: new Date().toISOString(),
+        },
+      ])
+      .select()
+      .single();
+
+    if (error) throw error;
+    console.log(`👤 Nuevo usuario registrado: ${userId}`);
+    return data;
+  } catch (error) {
+    console.error('Error registrando usuario:', error);
+    return null;
+  }
+}
+
+/**
+ * Obtener todos los usuarios para notificaciones
  */
 async function getAllUsers(onlyWithCredits = false) {
   try {
@@ -65,24 +110,30 @@ async function getUnsentNotifications() {
  */
 async function markNotificationAsSent(notificationId) {
   try {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('notifications')
       .update({
         sent: true,
         sent_at: new Date().toISOString(),
       })
-      .eq('id', notificationId);
+      .eq('id', notificationId)
+      .select();
 
-    if (error) throw error;
+    if (error) {
+      console.error(`❌ Error marcando notificación ${notificationId}:`, error);
+      return false;
+    }
+
+    console.log(`✅ Notificación ${notificationId} marcada como enviada`);
     return true;
   } catch (error) {
-    console.error('Error marcando notificación como enviada:', error);
+    console.error('Error en markNotificationAsSent:', error);
     return false;
   }
 }
 
 /**
- * Enviar notificación a un usuario
+ * Enviar notificación a usuario
  */
 async function sendNotificationToUser(userId, title, message, type = 'info') {
   try {
@@ -142,11 +193,11 @@ async function processNotifications() {
 
         if (success) sentCount++;
 
-        // Pequeña pausa para no saturar Telegram
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // Pausa para no saturar Telegram
+        await new Promise(resolve => setTimeout(resolve, 150));
       }
 
-      // Marcar como enviada
+      // Marcar como enviada DESPUÉS de enviar a todos
       await markNotificationAsSent(notification.id);
       console.log(`✅ Notificación ID ${notification.id} enviada a ${sentCount}/${users.length} usuarios`);
     }
@@ -160,41 +211,48 @@ async function processNotifications() {
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
+  const firstName = msg.from.first_name || 'Usuario';
 
   try {
-    // Registrar usuario en Supabase
-    const { data: existingUser } = await supabase
-      .from('users')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
-
-    if (!existingUser) {
-      await supabase.from('users').insert([
-        {
-          user_id: userId,
-          credits: 0,
-          created_at: new Date().toISOString(),
-        },
-      ]);
-      console.log(`👤 Nuevo usuario registrado: ${userId}`);
+    // Registrar o obtener usuario
+    let user = await getUser(userId);
+    if (!user) {
+      user = await registerUser(userId);
     }
 
     const message = `
-🎉 *¡Bienvenido a LittlePay!*
+🎉 *¡Bienvenido a LittlePay, ${firstName}!*
 
-Soy un bot que te ayuda a comprar números de teléfono para recibir SMS.
+Soy tu bot asistente para comprar números de teléfono y recibir SMS de forma rápida y segura.
 
-*Comandos disponibles:*
-/buy - Comprar un número
-/balance - Ver tu saldo
-/help - Ayuda
+💰 *Tu saldo actual:* $${user?.credits || 0}
+
+¿Qué quieres hacer?
     `;
 
-    await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+    const options = {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '📱 Comprar Número', callback_data: 'buy_number' },
+            { text: '💰 Ver Saldo', callback_data: 'check_balance' },
+          ],
+          [
+            { text: '📜 Historial', callback_data: 'view_history' },
+            { text: '❓ Ayuda', callback_data: 'help' },
+          ],
+        ],
+      },
+      parse_mode: 'Markdown',
+    };
+
+    await bot.sendMessage(chatId, message, options);
   } catch (error) {
     console.error('Error en /start:', error);
-    await bot.sendMessage(chatId, '❌ Hubo un error. Intenta más tarde.');
+    await bot.sendMessage(
+      chatId,
+      '❌ Hubo un error. Por favor, intenta más tarde.'
+    );
   }
 });
 
@@ -203,18 +261,30 @@ bot.onText(/\/balance/, async (msg) => {
   const userId = msg.from.id;
 
   try {
-    const { data: user } = await supabase
-      .from('users')
-      .select('credits')
-      .eq('user_id', userId)
-      .single();
+    let user = await getUser(userId);
+    if (!user) {
+      user = await registerUser(userId);
+    }
 
-    const credits = user?.credits || 0;
-    await bot.sendMessage(
-      chatId,
-      `💰 *Tu saldo:* $${credits}`,
-      { parse_mode: 'Markdown' }
-    );
+    const message = `
+💰 *Tu Saldo*
+
+Balance disponible: *$${user?.credits || 0}*
+
+¿Quieres comprar más créditos?
+    `;
+
+    const options = {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '➕ Comprar Créditos', callback_data: 'buy_credits' }],
+          [{ text: '🔙 Volver al Menú', callback_data: 'back_menu' }],
+        ],
+      },
+      parse_mode: 'Markdown',
+    };
+
+    await bot.sendMessage(chatId, message, options);
   } catch (error) {
     console.error('Error en /balance:', error);
     await bot.sendMessage(chatId, '❌ Error al obtener tu saldo.');
@@ -225,21 +295,228 @@ bot.onText(/\/help/, async (msg) => {
   const chatId = msg.chat.id;
 
   const message = `
-*📞 LittlePay Bot - Ayuda*
+❓ *Ayuda - LittlePay*
 
-*Comandos:*
-/start - Inicia el bot
-/balance - Ver tu saldo
-/buy - Comprar número
-/history - Ver tu historial
+*📚 Guía de uso:*
 
-¿Necesitas más ayuda? Contacta al administrador.
-  `;
+1️⃣ *Comprar Número*
+   Selecciona el país y servicio que necesitas
 
-  await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+2️⃣ *Recibir SMS*
+   El código llegará directamente a tu bot
+
+3️⃣ *Ver Historial*
+   Consulta todos tus números y mensajes
+
+4️⃣ *Soporte*
+   Si tienes problemas, contacta al administrador
+
+*Comandos disponibles:*
+/start - Menú principal
+/balance - Ver saldo
+/help - Esta ayuda
+    `;
+
+  const options = {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🔙 Volver al Menú', callback_data: 'back_menu' }],
+      ],
+    },
+    parse_mode: 'Markdown',
+  };
+
+  await bot.sendMessage(chatId, message, options);
 });
 
-// Manejo de errores
+// ==================== BOTONES INLINE ====================
+
+bot.on('callback_query', async (query) => {
+  const chatId = query.message.chat.id;
+  const userId = query.from.id;
+  const action = query.data;
+
+  try {
+    switch (action) {
+      case 'check_balance': {
+        const user = await getUser(userId);
+        const message = `
+💰 *Tu Saldo Actual*
+
+Balance: *$${user?.credits || 0}*
+Teléfonos activos: *${0}*
+
+¿Quieres hacer algo más?
+        `;
+
+        const options = {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '📱 Comprar Número', callback_data: 'buy_number' }],
+              [{ text: '🔙 Volver', callback_data: 'back_menu' }],
+            ],
+          },
+          parse_mode: 'Markdown',
+        };
+
+        await bot.editMessageText(message, {
+          chat_id: chatId,
+          message_id: query.message.message_id,
+          ...options,
+        });
+        break;
+      }
+
+      case 'buy_number': {
+        const message = `
+📱 *Comprar Número*
+
+Selecciona el país:
+        `;
+
+        const options = {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: '🇲🇽 México', callback_data: 'country_mx' },
+                { text: '🇺🇸 USA', callback_data: 'country_us' },
+              ],
+              [
+                { text: '🇪🇸 España', callback_data: 'country_es' },
+                { text: '🇦🇷 Argentina', callback_data: 'country_ar' },
+              ],
+              [{ text: '🔙 Volver', callback_data: 'back_menu' }],
+            ],
+          },
+          parse_mode: 'Markdown',
+        };
+
+        await bot.editMessageText(message, {
+          chat_id: chatId,
+          message_id: query.message.message_id,
+          ...options,
+        });
+        break;
+      }
+
+      case 'view_history': {
+        const message = `
+📜 *Tu Historial*
+
+No tienes números activos aún.
+
+Compra tu primer número para empezar.
+        `;
+
+        const options = {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '📱 Comprar Número', callback_data: 'buy_number' }],
+              [{ text: '🔙 Volver', callback_data: 'back_menu' }],
+            ],
+          },
+          parse_mode: 'Markdown',
+        };
+
+        await bot.editMessageText(message, {
+          chat_id: chatId,
+          message_id: query.message.message_id,
+          ...options,
+        });
+        break;
+      }
+
+      case 'help': {
+        const message = `
+❓ *Ayuda y Soporte*
+
+*Preguntas frecuentes:*
+
+🔸 ¿Cómo compro un número?
+   Ve a Comprar Número y selecciona el país
+
+🔸 ¿Cuánto cuesta?
+   Desde $1 USD por número
+
+🔸 ¿Los números son reutilizables?
+   No, cada número es de un solo uso
+
+¿Necesitas más ayuda?
+Contacta al administrador.
+        `;
+
+        const options = {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔙 Volver', callback_data: 'back_menu' }],
+            ],
+          },
+          parse_mode: 'Markdown',
+        };
+
+        await bot.editMessageText(message, {
+          chat_id: chatId,
+          message_id: query.message.message_id,
+          ...options,
+        });
+        break;
+      }
+
+      case 'back_menu': {
+        const user = await getUser(userId);
+        const message = `
+🎉 *Menú Principal*
+
+💰 *Tu saldo:* $${user?.credits || 0}
+
+¿Qué quieres hacer?
+        `;
+
+        const options = {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: '📱 Comprar', callback_data: 'buy_number' },
+                { text: '💰 Saldo', callback_data: 'check_balance' },
+              ],
+              [
+                { text: '📜 Historial', callback_data: 'view_history' },
+                { text: '❓ Ayuda', callback_data: 'help' },
+              ],
+            ],
+          },
+          parse_mode: 'Markdown',
+        };
+
+        await bot.editMessageText(message, {
+          chat_id: chatId,
+          message_id: query.message.message_id,
+          ...options,
+        });
+        break;
+      }
+
+      default:
+        // Responder otros botones
+        await bot.answerCallbackQuery(query.id, {
+          text: '⏳ Función en desarrollo...',
+          show_alert: false,
+        });
+    }
+
+    // Responder callback
+    await bot.answerCallbackQuery(query.id);
+  } catch (error) {
+    console.error('Error en callback_query:', error);
+    await bot.answerCallbackQuery(query.id, {
+      text: '❌ Error al procesar tu solicitud',
+      show_alert: true,
+    });
+  }
+});
+
+// ==================== MANEJO DE ERRORES ====================
+
 bot.on('polling_error', (error) => {
   console.error('error:', error);
 });
