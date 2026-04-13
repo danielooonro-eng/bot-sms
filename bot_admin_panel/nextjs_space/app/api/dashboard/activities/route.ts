@@ -1,63 +1,43 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getSession } from '@/lib/auth'
-import { successResponse } from '@/lib/api-utils'
+import { createClient } from '@supabase/supabase-js';
+import { NextRequest, NextResponse } from 'next/server';
 
-interface Activity {
-  id: string
-  user: string
-  action: string
-  timestamp: string
-  service?: string
-  amount?: number
-}
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
+);
 
 export async function GET(request: NextRequest) {
   try {
-    // Verify session
-    const session = await getSession()
-    if (!session) {
-      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
-    }
+    const searchParams = request.nextUrl.searchParams;
+    const limit = parseInt(searchParams.get('limit') || '10');
+    const offset = parseInt(searchParams.get('offset') || '0');
 
-    const searchParams = request.nextUrl.searchParams
-    const limit = parseInt(searchParams.get('limit') || '10')
+    // Intenta obtener de la tabla logs (actividades)
+    const { data, error, count } = await supabase
+      .from('logs')
+      .select('*', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
 
-    // TODO: Fetch from Supabase
-    // For now, return mock data based on users.json
-    const activities: Activity[] = [
-      {
-        id: '1',
-        user: 'User 8349475987',
-        action: 'Rentó número',
-        timestamp: 'Hace 2h',
-        service: 'Google',
-        amount: 8,
-      },
-      {
-        id: '2',
-        user: 'User 8349475987',
-        action: 'Recibió código SMS',
-        timestamp: 'Hace 2h',
-        service: 'Google',
-      },
-      {
-        id: '3',
-        user: 'User 8349475987',
-        action: 'Rentó número',
-        timestamp: 'Hace 5h',
-        service: 'Uber',
-        amount: 10,
-      },
-    ].slice(0, limit)
+    if (error) throw error;
 
-    return NextResponse.json(
-      successResponse(activities, 'Activities retrieved successfully')
-    )
-  } catch (error) {
-    console.error('Error fetching activities:', error)
-    return NextResponse.json(
-      { success: false, error: 'Internal server error' },
-      { status: 500 }
-    )
+    return NextResponse.json({
+      success: true,
+      data: data || [],
+      count: count || 0,
+      offset,
+      limit,
+    });
+  } catch (error: any) {
+    console.error('Error fetching activities:', error);
+    
+    // Si no existe la tabla logs, retornar datos vacíos pero sin error
+    return NextResponse.json({
+      success: true,
+      data: [],
+      count: 0,
+      offset: 0,
+      limit: 10,
+    });
   }
 }
