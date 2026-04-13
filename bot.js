@@ -164,10 +164,19 @@ async function getUnsentNotifications() {
 
 /**
  * Marca una notificación como enviada
+ * MEJORADA: Logging detallado de errores y validación de actualización
  */
 async function markNotificationAsSent(notificationId) {
   try {
-    const { error } = await supabase
+    // Validar parámetro
+    if (!notificationId) {
+      console.error('❌ markNotificationAsSent: notificationId no proporcionado');
+      return false;
+    }
+
+    console.log(`📍 Intentando marcar notificación ${notificationId} como enviada...`);
+
+    const { data, error, status, statusText } = await supabase
       .from('notifications')
       .update({
         sent: true,
@@ -175,14 +184,44 @@ async function markNotificationAsSent(notificationId) {
       })
       .eq('id', notificationId);
 
+    // Si hay error, loguear COMPLETAMENTE para debugging
     if (error) {
-      console.error('Error marcando notificación como enviada:', error);
+      console.error(`❌ Error en UPDATE para notificación ${notificationId}:`);
+      console.error('   Código:', error.code || 'N/A');
+      console.error('   Mensaje:', error.message || 'N/A');
+      console.error('   Detalles:', JSON.stringify(error, null, 2));
+      console.error(`   Status HTTP: ${status || 'N/A'} - ${statusText || 'N/A'}`);
+      
+      // Posibles causas:
+      if (error.message?.includes('row level security')) {
+        console.error('   ⚠️ POSIBLE CAUSA: Row Level Security (RLS) habilitado');
+        console.error('   Solución: Revisa las políticas RLS en Supabase');
+      }
+      if (error.message?.includes('permission')) {
+        console.error('   ⚠️ POSIBLE CAUSA: Permisos insuficientes con ANON_KEY');
+        console.error('   Solución: Configura RLS correctamente para permitir UPDATE');
+      }
+      
       return false;
     }
 
+    // Verificar que el UPDATE realmente cambió algo
+    if (!data || data.length === 0) {
+      console.warn(`⚠️ UPDATE ejecutado pero no cambió registros (notificationId: ${notificationId})`);
+      console.warn('   Posible causa: El ID no existe o ya estaba marcado como enviado');
+      return false;
+    }
+
+    console.log(`✅ Notificación ${notificationId} marcada como enviada exitosamente`);
+    console.log(`   Datos actualizados:`, JSON.stringify(data[0], null, 2));
+    
     return true;
+
   } catch (err) {
-    console.error('Error en markNotificationAsSent:', err);
+    console.error(`❌ Excepción en markNotificationAsSent para ID ${notificationId}:`);
+    console.error('   Error:', err.message || 'N/A');
+    console.error('   Stack:', err.stack || 'N/A');
+    console.error('   Objeto completo:', JSON.stringify(err, null, 2));
     return false;
   }
 }
@@ -223,6 +262,7 @@ async function sendNotificationToUser(userId, notification) {
 
 /**
  * Procesa todas las notificaciones pendientes
+ * MEJORADA: Mejor logging y manejo de errores
  */
 async function processNotifications() {
   try {
@@ -232,18 +272,27 @@ async function processNotifications() {
       return;
     }
 
-    console.log(`📨 Procesando ${notifications.length} notificación(es)...`);
+    console.log(`\n📨 ════════════════════════════════════════`);
+    console.log(`📨 Procesando ${notifications.length} notificación(es) pendiente(s)...`);
+    console.log(`📨 ════════════════════════════════════════\n`);
 
     for (const notification of notifications) {
+      console.log(`\n📬 Notificación ID: ${notification.id}`);
+      console.log(`   Tipo: ${notification.recipient_type}`);
+      console.log(`   Título: ${notification.title || '(sin título)'}`);
+      console.log(`   Creada: ${notification.created_at}`);
+      
       let recipientIds = [];
 
       // Determinar a quién enviar según recipient_type
       if (notification.recipient_type === 'all') {
         // Enviar a todos los usuarios en users.json
         recipientIds = Array.from(users.keys());
+        console.log(`   Enviando a: TODOS LOS USUARIOS (${recipientIds.length} usuarios)`);
       } else if (notification.recipient_type === 'admin') {
         // Enviar solo al admin
         recipientIds = [ADMIN_ID];
+        console.log(`   Enviando a: ADMIN (${ADMIN_ID})`);
       } else if (notification.recipient_type === 'specific' && notification.user_ids) {
         // Enviar a usuarios específicos (si user_ids es un array o string)
         if (Array.isArray(notification.user_ids)) {
@@ -259,24 +308,42 @@ async function processNotifications() {
             recipientIds = [parseInt(notification.user_ids)];
           }
         }
+        console.log(`   Enviando a: USUARIOS ESPECÍFICOS (${recipientIds.length} usuarios)`);
       }
 
       // Enviar a cada recipiente
+      let successCount = 0;
+      let failCount = 0;
+      
       for (const userId of recipientIds) {
         const sent = await sendNotificationToUser(userId, notification);
-        if (!sent) {
-          console.warn(`⚠️ No se pudo enviar notificación a usuario ${userId}`);
+        if (sent) {
+          successCount++;
+        } else {
+          failCount++;
+          console.warn(`      ⚠️ No se pudo enviar a usuario ${userId}`);
         }
       }
 
+      console.log(`   Resultado envío: ✅ ${successCount} exitoso(s), ❌ ${failCount} fallido(s)`);
+
       // Marcar notificación como enviada
+      console.log(`   Marcando como enviada en BD...`);
       const marked = await markNotificationAsSent(notification.id);
-      if (marked) {
-        console.log(`✅ Notificación ${notification.id} marcada como enviada`);
+      if (!marked) {
+        console.error(`   ❌ FALLO al marcar notificación ${notification.id} como enviada`);
+        console.error(`      Revisar logs arriba para ver el error específico`);
       }
     }
+
+    console.log(`\n📨 ════════════════════════════════════════`);
+    console.log(`📨 Ciclo de procesamiento completado`);
+    console.log(`📨 ════════════════════════════════════════\n`);
+
   } catch (err) {
-    console.error('Error en processNotifications:', err);
+    console.error('\n❌ Error fatal en processNotifications:');
+    console.error('   Mensaje:', err.message || 'N/A');
+    console.error('   Stack:', err.stack || 'N/A');
   }
 }
 
@@ -696,7 +763,7 @@ console.log('🐣 LittlePay Bot corriendo...');
 console.log('📨 Sistema de notificaciones activado - Revisando cada 30 segundos');
 
 // Iniciar el procesamiento de notificaciones cada 30 segundos
-setInterval(processNotifications, 30000);
+setInterval(processNotifications, 10000);
 
 // Ejecutar la primera vez inmediatamente
 processNotifications();
