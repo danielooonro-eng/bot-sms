@@ -1,257 +1,282 @@
-'use client'
+'use client';
 
-import { useState, useEffect } from 'react'
-import { Card } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select'
-import {
-  Search,
-  Download,
-  Calendar,
-  Filter,
-} from 'lucide-react'
-import { AuditLog } from '@/lib/types'
-import toast from 'react-hot-toast'
+} from '@/components/ui/select';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { AlertCircle, CheckCircle, Loader2, Download, FileJson, FileText } from 'lucide-react';
 
-interface LogWithUser extends AuditLog {
-  user_email?: string
+interface Log {
+  id: number;
+  user_id: number;
+  action: string;
+  service: string;
+  status: string;
+  created_at: string;
+  details?: string;
 }
 
 export default function LogsPage() {
-  const [logs, setLogs] = useState<LogWithUser[]>([])
-  const [search, setSearch] = useState('')
-  const [actionType, setActionType] = useState('all')
-  const [loading, setLoading] = useState(true)
-  const [page, setPage] = useState(1)
+  const [logs, setLogs] = useState<Log[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [exporting, setExporting] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
-    fetchLogs()
-  }, [actionType, page])
+    fetchLogs();
+  }, []);
 
-  const fetchLogs = async () => {
+  const fetchLogs = async (
+    search = '',
+    status = 'all',
+    start = '',
+    end = ''
+  ) => {
     try {
-      const response = await fetch(
-        `/api/logs?action=${actionType}&page=${page}&limit=50`
-      )
-      const data = await response.json()
+      setLoading(true);
+      let url = '/api/logs?';
 
-      if (data.success) {
-        setLogs(data.data)
+      if (search) url += `search=${search}&`;
+      if (status !== 'all') url += `status=${status}&`;
+      if (start) url += `startDate=${start}&`;
+      if (end) url += `endDate=${end}&`;
+
+      const response = await fetch(url);
+      const result = await response.json();
+
+      if (result.success) {
+        setLogs(result.data || []);
       }
     } catch (error) {
-      console.error('Error fetching logs:', error)
-      toast.error('Error cargando logs')
+      console.error('Error fetching logs:', error);
+      setErrorMessage('Error al cargar logs');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
-  const filteredLogs = logs.filter((log) =>
-    log.description.toLowerCase().includes(search.toLowerCase()) ||
-    log.action.toLowerCase().includes(search.toLowerCase())
-  )
+  const handleSearch = (value: string) => {
+    setSearchTerm(value);
+    fetchLogs(value, statusFilter, startDate, endDate);
+  };
 
-  const handleDownload = async (format: 'csv' | 'json') => {
+  const handleStatusFilter = (value: string) => {
+    setStatusFilter(value);
+    fetchLogs(searchTerm, value, startDate, endDate);
+  };
+
+  const handleDateFilter = (start: string, end: string) => {
+    setStartDate(start);
+    setEndDate(end);
+    fetchLogs(searchTerm, statusFilter, start, end);
+  };
+
+  const handleExport = async (format: 'csv' | 'json') => {
     try {
-      const response = await fetch(`/api/logs/export?format=${format}`)
-      if (!response.ok) throw new Error('Export failed')
+      setExporting(format);
+      setErrorMessage('');
+      setSuccessMessage('');
 
-      const blob = await response.blob()
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `logs.${format}`
-      a.click()
-      window.URL.revokeObjectURL(url)
+      let url = `/api/logs/export?format=${format}`;
+      if (startDate) url += `&startDate=${startDate}`;
+      if (endDate) url += `&endDate=${endDate}`;
 
-      toast.success('Logs descargados')
-    } catch (error) {
-      console.error('Error downloading logs:', error)
-      toast.error('Error descargando logs')
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`Error: ${response.statusText}`);
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `logs_${new Date().toISOString().split('T')[0]}.${format}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(downloadUrl);
+
+      setSuccessMessage(`Logs exportados a ${format.toUpperCase()} correctamente`);
+      setTimeout(() => setSuccessMessage(''), 3000);
+    } catch (error: any) {
+      console.error('Error exporting:', error);
+      setErrorMessage(error.message || `Error al exportar a ${format.toUpperCase()}`);
+    } finally {
+      setExporting(null);
     }
-  }
+  };
 
-  const getActionColor = (action: string) => {
-    switch (action) {
-      case 'user_created':
-      case 'number_rented':
-        return 'bg-green-500/20 text-green-400'
-      case 'payment':
-        return 'bg-blue-500/20 text-blue-400'
-      case 'user_blocked':
-        return 'bg-red-500/20 text-red-400'
-      case 'config_updated':
-        return 'bg-yellow-500/20 text-yellow-400'
-      default:
-        return 'bg-slate-500/20 text-slate-400'
-    }
-  }
+  const getStatusBadge = (status: string) => {
+    const badges: { [key: string]: { bg: string; text: string } } = {
+      success: { bg: 'bg-green-100', text: 'text-green-800' },
+      error: { bg: 'bg-red-100', text: 'text-red-800' },
+      pending: { bg: 'bg-yellow-100', text: 'text-yellow-800' },
+      completed: { bg: 'bg-blue-100', text: 'text-blue-800' },
+    };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-blue-500"></div>
-      </div>
-    )
-  }
+    const badge = badges[status?.toLowerCase()] || { bg: 'bg-gray-100', text: 'text-gray-800' };
+    return badge;
+  };
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-white">Logs de Auditoría</h1>
-        <p className="text-slate-400">Historial completo de todas las acciones del sistema</p>
-      </div>
+      {errorMessage && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+      )}
 
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="flex-1 relative">
-          <Search className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
+      {successMessage && (
+        <Alert className="bg-green-50 border-green-200">
+          <CheckCircle className="h-4 w-4 text-green-600" />
+          <AlertDescription className="text-green-800">{successMessage}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* Filtros */}
+      <Card className="p-6">
+        <h2 className="text-lg font-semibold mb-4">Filtros y Búsqueda</h2>
+        <div className="grid gap-4 md:grid-cols-4">
           <Input
-            placeholder="Buscar en logs..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-10 bg-slate-800 border-slate-700 text-white"
+            placeholder="Buscar por usuario o acción..."
+            value={searchTerm}
+            onChange={(e) => handleSearch(e.target.value)}
+          />
+
+          <Select value={statusFilter} onValueChange={handleStatusFilter}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los estados</SelectItem>
+              <SelectItem value="success">✅ Exitoso</SelectItem>
+              <SelectItem value="error">❌ Error</SelectItem>
+              <SelectItem value="pending">⏳ Pendiente</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Input
+            type="date"
+            value={startDate}
+            onChange={(e) => handleDateFilter(e.target.value, endDate)}
+            placeholder="Desde"
+          />
+
+          <Input
+            type="date"
+            value={endDate}
+            onChange={(e) => handleDateFilter(startDate, e.target.value)}
+            placeholder="Hasta"
           />
         </div>
-        <Select value={actionType} onValueChange={setActionType}>
-          <SelectTrigger className="w-full sm:w-40 bg-slate-800 border-slate-700">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="bg-slate-800 border-slate-700">
-            <SelectItem value="all">Todos</SelectItem>
-            <SelectItem value="user_created">Usuario creado</SelectItem>
-            <SelectItem value="number_rented">Número rentado</SelectItem>
-            <SelectItem value="payment">Pago</SelectItem>
-            <SelectItem value="user_blocked">Usuario bloqueado</SelectItem>
-            <SelectItem value="config_updated">Config actualizada</SelectItem>
-          </SelectContent>
-        </Select>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleDownload('csv')}
-            className="border-slate-700 text-slate-300 hover:bg-slate-700"
-          >
-            <Download className="h-4 w-4 mr-2" />
-            CSV
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleDownload('json')}
-            className="border-slate-700 text-slate-300 hover:bg-slate-700"
-          >
-            <Download className="h-4 w-4 mr-2" />
-            JSON
-          </Button>
-        </div>
+      </Card>
+
+      {/* Botones de Exportación */}
+      <div className="flex gap-2">
+        <Button
+          onClick={() => handleExport('csv')}
+          disabled={exporting !== null}
+          variant="outline"
+          className="gap-2"
+        >
+          {exporting === 'csv' ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Exportando CSV...
+            </>
+          ) : (
+            <>
+              <FileText className="h-4 w-4" />
+              Descargar CSV
+            </>
+          )}
+        </Button>
+
+        <Button
+          onClick={() => handleExport('json')}
+          disabled={exporting !== null}
+          variant="outline"
+          className="gap-2"
+        >
+          {exporting === 'json' ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Exportando JSON...
+            </>
+          ) : (
+            <>
+              <FileJson className="h-4 w-4" />
+              Descargar JSON
+            </>
+          )}
+        </Button>
       </div>
 
-      {/* Logs Table */}
-      <Card className="bg-slate-800 border-slate-700 overflow-hidden">
+      {/* Tabla de Logs */}
+      <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-slate-700/50 border-b border-slate-700">
+            <thead className="bg-gray-50 border-b">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase">
-                  Fecha/Hora
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase">
-                  Acción
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase">
-                  Descripción
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase">
-                  Usuario
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase">
-                  Detalles
-                </th>
+                <th className="px-6 py-3 text-left text-sm font-semibold">User ID</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold">Acción</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold">Servicio</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold">Estado</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold">Fecha</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-700">
-              {filteredLogs.length > 0 ? (
-                filteredLogs.map((log) => (
-                  <tr key={log.id} className="hover:bg-slate-700/30 transition-colors">
-                    <td className="px-6 py-4 text-sm text-slate-400 whitespace-nowrap">
-                      {new Date(log.created_at).toLocaleString('es-MX')}
-                    </td>
-                    <td className="px-6 py-4 text-sm">
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${getActionColor(log.action)}`}>
-                        {log.action}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-white max-w-xs truncate">
-                      {log.description}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-slate-400">
-                      {log.user_id || 'Sistema'}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-slate-400">
-                      {log.metadata ? (
-                        <pre className="text-xs overflow-x-auto max-w-xs">
-                          {JSON.stringify(log.metadata, null, 2)}
-                        </pre>
-                      ) : (
-                        '-'
-                      )}
-                    </td>
-                  </tr>
-                ))
-              ) : (
+            <tbody className="divide-y">
+              {loading ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-slate-400">
-                    No hay logs que mostrar
+                  <td colSpan={5} className="px-6 py-8 text-center">
+                    <Loader2 className="h-6 w-6 animate-spin mx-auto" />
                   </td>
                 </tr>
+              ) : logs.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                    No hay logs
+                  </td>
+                </tr>
+              ) : (
+                logs.map((log) => {
+                  const statusBadge = getStatusBadge(log.status);
+                  return (
+                    <tr key={log.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 text-sm font-medium">{log.user_id}</td>
+                      <td className="px-6 py-4 text-sm">{log.action}</td>
+                      <td className="px-6 py-4 text-sm">{log.service}</td>
+                      <td className="px-6 py-4 text-sm">
+                        <span className={`px-2 py-1 rounded text-xs font-medium ${statusBadge.bg} ${statusBadge.text}`}>
+                          {log.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-sm">
+                        {new Date(log.created_at).toLocaleString()}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
       </Card>
-
-      {/* Pagination */}
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-slate-400">
-          Mostrando {filteredLogs.length} logs de {logs.length}
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page === 1}
-            onClick={() => setPage(p => p - 1)}
-            className="border-slate-700 text-slate-300 hover:bg-slate-700"
-          >
-            Anterior
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="border-slate-700 text-slate-300 hover:bg-slate-700"
-          >
-            Página {page}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage(p => p + 1)}
-            className="border-slate-700 text-slate-300 hover:bg-slate-700"
-          >
-            Siguiente
-          </Button>
-        </div>
-      </div>
     </div>
-  )
+  );
 }
