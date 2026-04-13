@@ -1,43 +1,91 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getSession } from '@/lib/auth'
-import { successResponse, errorResponse } from '@/lib/api-utils'
+import { createClient } from '@supabase/supabase-js';
+import { NextRequest, NextResponse } from 'next/server';
 
-export async function POST(
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
+);
+
+export async function GET(
   request: NextRequest,
   { params }: { params: { userId: string } }
 ) {
   try {
-    // Verify session
-    const session = await getSession()
-    if (!session) {
-      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
-    }
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', params.userId)
+      .single();
 
-    const { userId } = params
-    const body = await request.json()
-    const { blocked } = body
+    if (error) throw error;
 
-    if (typeof blocked !== 'boolean') {
-      return NextResponse.json(
-        errorResponse('Invalid blocked value'),
-        { status: 400 }
-      )
-    }
-
-    // TODO: Update user in Supabase
-    // For now, just return success
-
+    return NextResponse.json({
+      success: true,
+      data,
+    });
+  } catch (error: any) {
+    console.error('Error fetching user:', error);
     return NextResponse.json(
-      successResponse(
-        { userId, blocked },
-        `User ${blocked ? 'blocked' : 'unblocked'} successfully`
-      )
-    )
-  } catch (error) {
-    console.error('Error updating user:', error)
-    return NextResponse.json(
-      { success: false, error: 'Internal server error' },
+      { success: false, error: error.message },
       { status: 500 }
-    )
+    );
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { userId: string } }
+) {
+  try {
+    const { error } = await supabase
+      .from('users')
+      .delete()
+      .eq('id', params.userId);
+
+    if (error) throw error;
+
+    return NextResponse.json({
+      success: true,
+      message: 'Usuario eliminado correctamente',
+    });
+  } catch (error: any) {
+    console.error('Error deleting user:', error);
+    return NextResponse.json(
+      { success: false, error: error.message },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: { userId: string } }
+) {
+  try {
+    const body = await request.json();
+
+    const { data, error } = await supabase
+      .from('users')
+      .update({
+        ...body,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', params.userId)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return NextResponse.json({
+      success: true,
+      message: 'Usuario actualizado correctamente',
+      data,
+    });
+  } catch (error: any) {
+    console.error('Error updating user:', error);
+    return NextResponse.json(
+      { success: false, error: error.message },
+      { status: 500 }
+    );
   }
 }

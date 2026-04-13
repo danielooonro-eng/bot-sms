@@ -1,248 +1,383 @@
-'use client'
+'use client';
 
-import { useState, useEffect } from 'react'
-import { Card } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 import {
-  Search,
-  Filter,
-  MoreVertical,
-  Eye,
-  Lock,
-  Unlock,
-  History,
-} from 'lucide-react'
-import { BotUser } from '@/lib/types'
-import toast from 'react-hot-toast'
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Eye, Trash2, Plus, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
 
-interface UserWithStats extends BotUser {
-  total_spent?: number
-  last_rent_date?: string
+interface User {
+  id: number;
+  user_id: number;
+  credits: number;
+  order_id: string | null;
+  service: string | null;
+  has_photo: boolean;
+  created_at: string;
+  updated_at: string;
+  history?: string[];
 }
 
 export default function UsersPage() {
-  const [users, setUsers] = useState<UserWithStats[]>([])
-  const [search, setSearch] = useState('')
-  const [status, setStatus] = useState('all')
-  const [loading, setLoading] = useState(true)
-  const [selectedUser, setSelectedUser] = useState<UserWithStats | null>(null)
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [deleteUserId, setDeleteUserId] = useState<number | null>(null);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [newUserId, setNewUserId] = useState('');
+  const [newUserCredits, setNewUserCredits] = useState('0');
 
   useEffect(() => {
-    fetchUsers()
-  }, [status])
+    fetchUsers();
+  }, []);
 
-  const fetchUsers = async () => {
+  const fetchUsers = async (search = '') => {
     try {
-      const response = await fetch(`/api/users?status=${status}`)
-      const data = await response.json()
+      setLoading(true);
+      const query = search ? `?search=${search}` : '';
+      const response = await fetch(`/api/users${query}`);
+      const result = await response.json();
 
-      if (data.success) {
-        setUsers(data.data)
+      if (result.success) {
+        setUsers(result.data || []);
       }
     } catch (error) {
-      console.error('Error fetching users:', error)
-      toast.error('Error cargando usuarios')
+      console.error('Error fetching users:', error);
+      setErrorMessage('Error al cargar usuarios');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
-  const filteredUsers = users.filter(
-    (user) =>
-      user.telegram_id.toString().includes(search) ||
-      user.first_name?.toLowerCase().includes(search.toLowerCase()) ||
-      user.last_name?.toLowerCase().includes(search.toLowerCase())
-  )
+  const handleSearch = (value: string) => {
+    setSearchTerm(value);
+    fetchUsers(value);
+  };
 
-  const handleBlockUser = async (userId: string, block: boolean) => {
+  const handleDeleteUser = async (userId: number) => {
     try {
-      const response = await fetch(`/api/users/${userId}/block`, {
+      const response = await fetch(`/api/users/${userId}`, {
+        method: 'DELETE',
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        setUsers(users.filter(u => u.id !== userId));
+        setSuccessMessage('Usuario eliminado correctamente');
+        setDeleteUserId(null);
+        setTimeout(() => setSuccessMessage(''), 3000);
+      } else {
+        setErrorMessage(result.error || 'Error al eliminar usuario');
+      }
+    } catch (error: any) {
+      setErrorMessage(error.message || 'Error al eliminar usuario');
+    }
+  };
+
+  const handleCreateUser = async () => {
+    if (!newUserId.trim()) {
+      setErrorMessage('El User ID es requerido');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ blocked: block }),
-      })
+        body: JSON.stringify({
+          user_id: Number(newUserId),
+          credits: Number(newUserCredits) || 0,
+        }),
+      });
 
-      if (response.ok) {
-        setUsers(
-          users.map((u) => (u.id === userId ? { ...u, blocked: block } : u))
-        )
-        toast.success(block ? 'Usuario bloqueado' : 'Usuario desbloqueado')
+      const result = await response.json();
+
+      if (result.success) {
+        setUsers([result.data, ...users]);
+        setNewUserId('');
+        setNewUserCredits('0');
+        setShowCreateDialog(false);
+        setSuccessMessage('Usuario creado correctamente');
+        setTimeout(() => setSuccessMessage(''), 3000);
+      } else {
+        setErrorMessage(result.error || 'Error al crear usuario');
       }
-    } catch (error) {
-      console.error('Error updating user:', error)
-      toast.error('Error actualizando usuario')
+    } catch (error: any) {
+      setErrorMessage(error.message || 'Error al crear usuario');
     }
-  }
+  };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-blue-500"></div>
-      </div>
-    )
-  }
+  const getLastService = (user: User) => {
+    if (user.service) return user.service;
+    if (user.history && user.history.length > 0) {
+      return user.history[user.history.length - 1];
+    }
+    return 'N/A';
+  };
+
+  const getEstadoBadge = (user: User) => {
+    if (user.credits < 0) return { text: 'Suspendido', color: 'bg-red-100 text-red-800' };
+    if (user.credits === 0) return { text: 'Sin créditos', color: 'bg-yellow-100 text-yellow-800' };
+    return { text: 'Activo', color: 'bg-green-100 text-green-800' };
+  };
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-white">Gestión de Usuarios</h1>
-        <p className="text-slate-400">Administra y monitorea todos los usuarios</p>
+      {errorMessage && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+      )}
+
+      {successMessage && (
+        <Alert className="bg-green-50 border-green-200">
+          <CheckCircle className="h-4 w-4 text-green-600" />
+          <AlertDescription className="text-green-800">{successMessage}</AlertDescription>
+        </Alert>
+      )}
+
+      <div className="flex gap-4 items-center">
+        <Input
+          placeholder="Buscar por User ID o servicio..."
+          value={searchTerm}
+          onChange={(e) => handleSearch(e.target.value)}
+          className="flex-1"
+        />
+
+        <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+          <DialogTrigger asChild>
+            <Button className="gap-2">
+              <Plus className="h-4 w-4" />
+              Crear Usuario
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Crear Nuevo Usuario</DialogTitle>
+              <DialogDescription>
+                Agrega un nuevo usuario al sistema
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">User ID (Telegram) *</label>
+                <Input
+                  value={newUserId}
+                  onChange={(e) => setNewUserId(e.target.value)}
+                  placeholder="Ej: 123456789"
+                  type="number"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">Créditos iniciales</label>
+                <Input
+                  value={newUserCredits}
+                  onChange={(e) => setNewUserCredits(e.target.value)}
+                  placeholder="0"
+                  type="number"
+                  defaultValue="0"
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+                  Cancelar
+                </Button>
+                <Button onClick={handleCreateUser}>Crear Usuario</Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="flex-1 relative">
-          <Search className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
-          <Input
-            placeholder="Buscar por ID, nombre..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-10 bg-slate-800 border-slate-700 text-white"
-          />
-        </div>
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="w-full sm:w-40 bg-slate-800 border-slate-700">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="bg-slate-800 border-slate-700">
-            <SelectItem value="all">Todos</SelectItem>
-            <SelectItem value="active">Activos</SelectItem>
-            <SelectItem value="blocked">Bloqueados</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Table */}
-      <Card className="bg-slate-800 border-slate-700 overflow-hidden">
+      <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-slate-700/50 border-b border-slate-700">
+            <thead className="bg-gray-50 border-b">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase">
-                  ID Telegram
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase">
-                  Nombre
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase">
-                  Créditos
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase">
-                  Registro
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase">
-                  Última actividad
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase">
-                  Números rentados
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase">
-                  Estado
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase">
-                  Acciones
-                </th>
+                <th className="px-6 py-3 text-left text-sm font-semibold">User ID</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold">Créditos</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold">Servicio</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold">Estado</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold">Foto</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold">Creado</th>
+                <th className="px-6 py-3 text-right text-sm font-semibold">Acciones</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-700">
-              {filteredUsers.length > 0 ? (
-                filteredUsers.map((user) => (
-                  <tr key={user.id} className="hover:bg-slate-700/30 transition-colors">
-                    <td className="px-6 py-4 text-sm font-mono text-blue-400">
-                      {user.telegram_id}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-white">
-                      {user.first_name} {user.last_name || ''}
-                    </td>
-                    <td className="px-6 py-4 text-sm font-semibold text-white">
-                      {user.credits}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-slate-400">
-                      {new Date(user.created_at).toLocaleDateString('es-MX')}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-slate-400">
-                      {user.last_activity
-                        ? new Date(user.last_activity).toLocaleDateString('es-MX')
-                        : 'Nunca'}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-white">
-                      {user.rented_numbers?.length || 0}
-                    </td>
-                    <td className="px-6 py-4 text-sm">
-                      <span
-                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${
-                          user.blocked
-                            ? 'bg-red-500/20 text-red-400'
-                            : 'bg-green-500/20 text-green-400'
-                        }`}
-                      >
-                        {user.blocked ? '🔒 Bloqueado' : '✓ Activo'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-sm">
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-blue-400 hover:bg-blue-500/10"
-                          title="Ver detalles"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className={
-                            user.blocked
-                              ? 'text-green-400 hover:bg-green-500/10'
-                              : 'text-red-400 hover:bg-red-500/10'
-                          }
-                          onClick={() => handleBlockUser(user.id, !user.blocked)}
-                          title={user.blocked ? 'Desbloquear' : 'Bloquear'}
-                        >
-                          {user.blocked ? (
-                            <Unlock className="h-4 w-4" />
-                          ) : (
-                            <Lock className="h-4 w-4" />
-                          )}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-slate-400 hover:bg-slate-700"
-                          title="Ver historial"
-                        >
-                          <History className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              ) : (
+            <tbody className="divide-y">
+              {loading ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-8 text-center text-slate-400">
-                    No hay usuarios que mostrar
+                  <td colSpan={7} className="px-6 py-8 text-center">
+                    <Loader2 className="h-6 w-6 animate-spin mx-auto" />
                   </td>
                 </tr>
+              ) : users.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                    No hay usuarios
+                  </td>
+                </tr>
+              ) : (
+                users.map((user) => {
+                  const estado = getEstadoBadge(user);
+                  return (
+                    <tr key={user.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 text-sm font-medium">{user.user_id}</td>
+                      <td className="px-6 py-4 text-sm">${user.credits}</td>
+                      <td className="px-6 py-4 text-sm">{getLastService(user)}</td>
+                      <td className="px-6 py-4 text-sm">
+                        <span className={`px-2 py-1 rounded text-xs font-medium ${estado.color}`}>
+                          {estado.text}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-sm">
+                        {user.has_photo ? '✅ Sí' : '❌ No'}
+                      </td>
+                      <td className="px-6 py-4 text-sm">
+                        {new Date(user.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="px-6 py-4 text-right space-x-2">
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setSelectedUser(user)}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent className="max-w-2xl">
+                            <DialogHeader>
+                              <DialogTitle>Detalles del Usuario</DialogTitle>
+                            </DialogHeader>
+                            {selectedUser && (
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <p className="text-sm text-gray-600">ID de Base de Datos</p>
+                                  <p className="font-medium">{selectedUser.id}</p>
+                                </div>
+                                <div>
+                                  <p className="text-sm text-gray-600">User ID (Telegram)</p>
+                                  <p className="font-medium">{selectedUser.user_id}</p>
+                                </div>
+                                <div>
+                                  <p className="text-sm text-gray-600">Créditos</p>
+                                  <p className="font-medium text-lg text-green-600">
+                                    ${selectedUser.credits}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p className="text-sm text-gray-600">Estado</p>
+                                  <p className="font-medium">{getEstadoBadge(selectedUser).text}</p>
+                                </div>
+                                <div>
+                                  <p className="text-sm text-gray-600">Servicio Actual</p>
+                                  <p className="font-medium">{selectedUser.service || 'Ninguno'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-sm text-gray-600">Último Servicio</p>
+                                  <p className="font-medium">{getLastService(selectedUser)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-sm text-gray-600">Orden Activa</p>
+                                  <p className="font-medium">{selectedUser.order_id || 'Ninguna'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-sm text-gray-600">Foto</p>
+                                  <p className="font-medium">{selectedUser.has_photo ? '✅ Sí' : '❌ No'}</p>
+                                </div>
+                                <div className="col-span-2">
+                                  <p className="text-sm text-gray-600">Fecha de Creación</p>
+                                  <p className="font-medium">
+                                    {new Date(selectedUser.created_at).toLocaleString()}
+                                  </p>
+                                </div>
+                                <div className="col-span-2">
+                                  <p className="text-sm text-gray-600">Última Actualización</p>
+                                  <p className="font-medium">
+                                    {new Date(selectedUser.updated_at).toLocaleString()}
+                                  </p>
+                                </div>
+                                {selectedUser.history && selectedUser.history.length > 0 && (
+                                  <div className="col-span-2">
+                                    <p className="text-sm text-gray-600">Historial de Servicios</p>
+                                    <div className="flex flex-wrap gap-2 mt-2">
+                                      {selectedUser.history.map((service, idx) => (
+                                        <span
+                                          key={idx}
+                                          className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs"
+                                        >
+                                          {service}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </DialogContent>
+                        </Dialog>
+
+                        <AlertDialog open={deleteUserId === user.id} onOpenChange={(open) => !open && setDeleteUserId(null)}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-red-600 hover:text-red-800"
+                            onClick={() => setDeleteUserId(user.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>¿Eliminar usuario?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Estás a punto de eliminar al usuario {user.user_id}. Esta acción
+                                no se puede deshacer.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <div className="flex gap-2 justify-end">
+                              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                              <AlertDialogAction
+                                className="bg-red-600 hover:bg-red-700"
+                                onClick={() => handleDeleteUser(user.id)}
+                              >
+                                Eliminar
+                              </AlertDialogAction>
+                            </div>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
       </Card>
-
-      {/* Pagination info */}
-      <div className="text-sm text-slate-400 text-center">
-        Mostrando {filteredUsers.length} de {users.length} usuarios
-      </div>
     </div>
-  )
+  );
 }

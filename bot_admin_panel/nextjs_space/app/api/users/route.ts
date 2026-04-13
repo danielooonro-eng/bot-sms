@@ -1,59 +1,84 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getSession } from '@/lib/auth'
-import { successResponse } from '@/lib/api-utils'
-import { BotUser } from '@/lib/types'
+import { createClient } from '@supabase/supabase-js';
+import { NextRequest, NextResponse } from 'next/server';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
+);
 
 export async function GET(request: NextRequest) {
   try {
-    // Verify session
-    const session = await getSession()
-    if (!session) {
-      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
+    const searchParams = request.nextUrl.searchParams;
+    const search = searchParams.get('search') || '';
+    const limit = parseInt(searchParams.get('limit') || '100');
+
+    let query = supabase
+      .from('users')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (search) {
+      query = query.or(`user_id.ilike.%${search}%,service.ilike.%${search}%`);
     }
 
-    const searchParams = request.nextUrl.searchParams
-    const status = searchParams.get('status') || 'all'
+    const { data, error } = await query.limit(limit);
 
-    // TODO: Fetch from Supabase
-    // For now, return mock data
-    const users: BotUser[] = [
-      {
-        id: '1',
-        telegram_id: 8349475987,
-        first_name: 'Usuario',
-        credits: 46,
-        blocked: false,
-        created_at: new Date('2024-01-15'),
-        last_activity: new Date('2024-04-10'),
-        rented_numbers: Array(26).fill(null).map((_, i) => ({
-          id: `rent-${i}`,
-          user_id: '1',
-          phone_number: '+1234567890',
-          service: 'google',
-          country: 'usa',
-          price: 8,
-          rented_at: new Date(),
-          is_active: false,
-        })),
-        transactions: [],
-      },
-    ]
+    if (error) throw error;
 
-    // Filter by status
-    const filtered = status === 'all' 
-      ? users
-      : status === 'active'
-        ? users.filter(u => !u.blocked)
-        : users.filter(u => u.blocked)
-
+    return NextResponse.json({
+      success: true,
+      data: data || [],
+      count: data?.length || 0,
+    });
+  } catch (error: any) {
+    console.error('Error fetching users:', error);
     return NextResponse.json(
-      successResponse(filtered, 'Users retrieved successfully')
-    )
-  } catch (error) {
-    console.error('Error fetching users:', error)
-    return NextResponse.json(
-      { success: false, error: 'Internal server error' },
+      { success: false, error: error.message },
       { status: 500 }
-    )
+    );
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { user_id, credits = 0, service = null } = body;
+
+    if (!user_id) {
+      return NextResponse.json(
+        { success: false, error: 'User ID es requerido' },
+        { status: 400 }
+      );
+    }
+
+    const { data, error } = await supabase
+      .from('users')
+      .insert([
+        {
+          user_id: Number(user_id),
+          credits: Number(credits),
+          service,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ])
+      .select();
+
+    if (error) throw error;
+
+    return NextResponse.json(
+      {
+        success: true,
+        message: 'Usuario creado correctamente',
+        data: data?.[0],
+      },
+      { status: 201 }
+    );
+  } catch (error: any) {
+    console.error('Error creating user:', error);
+    return NextResponse.json(
+      { success: false, error: error.message || 'Error al crear usuario' },
+      { status: 500 }
+    );
   }
 }
