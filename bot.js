@@ -163,6 +163,46 @@ async function getUnsentNotifications() {
 }
 
 /**
+ * Obtiene todos los usuarios de Supabase (tabla users)
+ * Retorna array de user_id para enviar notificaciones
+ */
+async function getAllUsers() {
+  try {
+    console.log('🔍 Obteniendo usuarios de Supabase...');
+    
+    const { data, error } = await supabase
+      .from('users')
+      .select('user_id');
+
+    if (error) {
+      console.error('❌ Error obteniendo usuarios de Supabase:', error.message);
+      console.error('   Detalles:', JSON.stringify(error, null, 2));
+      return [];
+    }
+
+    if (!data || data.length === 0) {
+      console.warn('⚠️ No hay usuarios en la tabla users de Supabase');
+      return [];
+    }
+
+    // Extraer user_id de cada registro y convertir a número
+    const userIds = data
+      .map(record => record.user_id)
+      .filter(id => id !== null && id !== undefined)
+      .map(id => parseInt(id) || id);
+
+    console.log(`✅ Se obtuvieron ${userIds.length} usuarios de Supabase`);
+    return userIds;
+
+  } catch (err) {
+    console.error('❌ Excepción en getAllUsers:');
+    console.error('   Mensaje:', err.message || 'N/A');
+    console.error('   Stack:', err.stack || 'N/A');
+    return [];
+  }
+}
+
+/**
  * Marca una notificación como enviada
  * MEJORADA: Logging detallado de errores y validación de actualización
  */
@@ -286,8 +326,8 @@ async function processNotifications() {
 
       // Determinar a quién enviar según recipient_type
       if (notification.recipient_type === 'all') {
-        // Enviar a todos los usuarios en users.json
-        recipientIds = Array.from(users.keys());
+        // Enviar a todos los usuarios de Supabase
+        recipientIds = await getAllUsers();
         console.log(`   Enviando a: TODOS LOS USUARIOS (${recipientIds.length} usuarios)`);
       } else if (notification.recipient_type === 'admin') {
         // Enviar solo al admin
@@ -763,7 +803,7 @@ console.log('🐣 LittlePay Bot corriendo...');
 console.log('📨 Sistema de notificaciones activado - Revisando cada 30 segundos');
 
 // Iniciar el procesamiento de notificaciones cada 30 segundos
-setInterval(processNotifications, 10000);
+setInterval(processNotifications, 30000);
 
 // Ejecutar la primera vez inmediatamente
 processNotifications();
