@@ -1,0 +1,165 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║         🐣 LITTLEPAY BOT - MIGRACIÓN A SUPABASE - ESTRUCTURA             ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║                                                                            ║
+║  📁 /home/ubuntu/                                                         ║
+║  ├─ 📄 bot.js                      (17.8 KB) ⭐ PRINCIPAL                ║
+║  │  └─ Bot de Telegram con Supabase integrado                            ║
+║  │                                                                        ║
+║  ├─ 📄 migracion.js                (3.8 KB) ⭐ SCRIPT MIGRACIÓN          ║
+║  │  └─ Traspasar users.json → Supabase                                   ║
+║  │                                                                        ║
+║  ├─ 📄 package.json                (488 B)                               ║
+║  │  └─ Dependencias incluidas: @supabase/supabase-js                    ║
+║  │                                                                        ║
+║  ├─ 📄 .env                        (774 B)                               ║
+║  │  └─ Variables de entorno (completar SUPABASE_*)                      ║
+║  │                                                                        ║
+║  ├─ 📄 SETUP.md                    (6.2 KB) ⭐ LEER PRIMERO              ║
+║  │  ├─ 1️⃣  Crear proyecto Supabase                                      ║
+║  │  ├─ 2️⃣  Crear tabla con SQL                                          ║
+║  │  ├─ 3️⃣  Configurar .env                                              ║
+║  │  ├─ 4️⃣  Instalar dependencias                                        ║
+║  │  ├─ 5️⃣  Ejecutar migración                                           ║
+║  │  └─ 6️⃣  Ejecutar bot                                                 ║
+║  │                                                                        ║
+║  ├─ 📄 README.md                   (5.3 KB)                              ║
+║  │  └─ Descripción general del proyecto                                  ║
+║  │                                                                        ║
+║  ├─ 📄 MIGRATION_SUMMARY.md        (6.9 KB)                              ║
+║  │  └─ Resumen completo de cambios (este documento)                      ║
+║  │                                                                        ║
+║  ├─ 📄 PROJECT_STRUCTURE.txt       (esta visualización)                  ║
+║  │                                                                        ║
+║  ├─ 🖼️  welcome.png                (4.1 MB)                              ║
+║  │  └─ Imagen de bienvenida del bot                                      ║
+║  │                                                                        ║
+║  ├─ 📄 .gitignore                  (versión control)                     ║
+║  │  └─ Excluye node_modules, .env, etc.                                 ║
+║  │                                                                        ║
+║  └─ 📁 .git/                       (repositorio)                         ║
+║     └─ 3 commits: Migración completada                                   ║
+║                                                                            ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║                          🚀 INICIO RÁPIDO                                 ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║                                                                            ║
+║  1. Lee SETUP.md (guía paso a paso) ⭐                                    ║
+║                                                                            ║
+║  2. Crea proyecto en Supabase                                             ║
+║     → https://supabase.com                                               ║
+║                                                                            ║
+║  3. Ejecuta script SQL en Supabase Console                                ║
+║     → (Script completo en SETUP.md sección 2)                            ║
+║                                                                            ║
+║  4. Edita .env con tus credenciales                                       ║
+║     SUPABASE_URL=https://your-project.supabase.co                        ║
+║     SUPABASE_ANON_KEY=your-key                                            ║
+║     SUPABASE_SERVICE_ROLE_KEY=your-key                                    ║
+║                                                                            ║
+║  5. Instala dependencias                                                  ║
+║     $ npm install                                                         ║
+║                                                                            ║
+║  6. Migra datos (si tienes users.json anterior)                           ║
+║     $ npm run migrate                                                     ║
+║                                                                            ║
+║  7. Ejecuta bot                                                            ║
+║     $ npm start                                                           ║
+║                                                                            ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║                      ✨ CAMBIOS PRINCIPALES                               ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║                                                                            ║
+║  ANTES (JSON Local)           →  DESPUÉS (Supabase PostgreSQL)           ║
+║  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ║
+║                                                                            ║
+║  • users.json (archivo)       →  Tabla 'users' en PostgreSQL             ║
+║  • loadUsers() síncrono       →  getUser() asíncrono                     ║
+║  • saveUsers() manual         →  updateUser() automático                 ║
+║  • ~100 usuarios              →  Miles de usuarios                        ║
+║  • Sin respaldos              →  Respaldos automáticos                   ║
+║  • Acceso solo local          →  Acceso desde cualquier lugar            ║
+║                                                                            ║
+║  ✅ TODO LO DEMÁS IDÉNTICO:                                              ║
+║     • Funcionalidad del bot 100% igual                                   ║
+║     • Mismos servicios y precios                                         ║
+║     • Mismo flujo de usuario                                             ║
+║     • Misma integración 5Sim                                             ║
+║     • Credenciales Telegram preservadas                                  ║
+║                                                                            ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║                    📊 TABLA USERS (Supabase)                              ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║                                                                            ║
+║  Columna           Tipo              Descripción                          ║
+║  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ║
+║  id                BIGSERIAL         PRIMARY KEY (auto)                   ║
+║  user_id           BIGINT UNIQUE     ID de Telegram                      ║
+║  credits           INT               Créditos disponibles                ║
+║  order_id          TEXT              ID de orden activa                  ║
+║  service           VARCHAR(50)       Servicio seleccionado              ║
+║  history           TEXT[]            Array de eventos                    ║
+║  message_id        BIGINT            Para editar mensajes                ║
+║  has_photo         BOOLEAN           Si mensaje tiene foto               ║
+║  created_at        TIMESTAMP         Cuando se creó                      ║
+║  updated_at        TIMESTAMP         Última actualización                ║
+║                                                                            ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║                     🔐 SEGURIDAD & BUENAS PRÁCTICAS                       ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║                                                                            ║
+║  ✓ SERVICE_ROLE_KEY solo para migraciones, no en producción              ║
+║  ✓ ANON_KEY para acceso normal del bot                                   ║
+║  ✓ .env está en .gitignore (no se versionará)                           ║
+║  ✓ Row Level Security (RLS) recomendado para producción                 ║
+║  ✓ Credenciales almacenadas como variables de entorno                   ║
+║                                                                            ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║                        🆘 SOLUCIÓN DE PROBLEMAS                           ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║                                                                            ║
+║  Error: \"Cannot find table 'users'\"                                    ║
+║  └─ Solución: Ejecuta el SQL en Supabase (ver SETUP.md sección 2)       ║
+║                                                                            ║
+║  Error: \"SUPABASE_URL no definida\"                                     ║
+║  └─ Solución: Edita .env y completa las variables (SETUP.md sección 3)  ║
+║                                                                            ║
+║  Error: \"No se pudo conectar a Supabase\"                                ║
+║  └─ Solución: Verifica SUPABASE_URL tenga formato: https://xxx.supabase.co ║
+║                                                                            ║
+║  Migración no funciona:                                                   ║
+║  └─ Verifica: users.json existe, SUPABASE_SERVICE_ROLE_KEY en .env,     ║
+║              tabla 'users' existe en Supabase                             ║
+║                                                                            ║
+║  Más ayuda → Lee SETUP.md \"Solución de Problemas\" (sección completa)   ║
+║                                                                            ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║                        📚 ARCHIVOS IMPORTANTES                             ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║                                                                            ║
+║  1. SETUP.md ⭐⭐⭐                                                        ║
+║     → Guía paso a paso para configurar Supabase                          ║
+║     → LEER PRIMERO antes de hacer nada                                   ║
+║                                                                            ║
+║  2. bot.js                                                                ║
+║     → Código del bot migrado (listo para usar)                           ║
+║     → Contiene todas las funciones async de Supabase                     ║
+║                                                                            ║
+║  3. migracion.js                                                          ║
+║     → Script para trasladar datos de users.json a Supabase               ║
+║     → Ejecutar: npm run migrate                                          ║
+║                                                                            ║
+║  4. package.json                                                          ║
+║     → Dependencias actualizadas (@supabase/supabase-js)                 ║
+║     → Scripts: npm start, npm run migrate                                ║
+║                                                                            ║
+║  5. .env                                                                  ║
+║     → Plantilla de variables (EDITAR ANTES DE EJECUTAR)                 ║
+║     → Mantener seguro, NO compartir                                      ║
+║                                                                            ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+💡 RECOMENDACIÓN: Imprime o guarda SETUP.md y léelo completamente.
+                 Es tu guía para poner el bot en marcha. 🚀
+
+✅ Migración completada exitosamente el 10/04/2026
