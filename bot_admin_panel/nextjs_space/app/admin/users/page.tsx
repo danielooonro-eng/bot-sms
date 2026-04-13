@@ -257,30 +257,30 @@ export default function UsersPage() {
         </Dialog>
       </div>
 
-      <Card className="overflow-hidden">
+      <Card className="overflow-hidden bg-slate-800 border-slate-700">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-50 border-b">
+            <thead className="bg-slate-900 border-b border-slate-700">
               <tr>
-                <th className="px-6 py-3 text-left text-sm font-semibold">User ID</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold">Créditos</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold">Servicio</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold">Estado</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold">Foto</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold">Creado</th>
-                <th className="px-6 py-3 text-right text-sm font-semibold">Acciones</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-slate-200">User ID</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-slate-200">Créditos</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-slate-200">Servicio</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-slate-200">Estado</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-slate-200">Foto</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-slate-200">Creado</th>
+                <th className="px-6 py-3 text-right text-sm font-semibold text-slate-200">Acciones</th>
               </tr>
             </thead>
-            <tbody className="divide-y">
+            <tbody className="divide-y divide-slate-700">
               {loading ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-8 text-center">
-                    <Loader2 className="h-6 w-6 animate-spin mx-auto" />
+                    <Loader2 className="h-6 w-6 animate-spin mx-auto text-blue-400" />
                   </td>
                 </tr>
               ) : users.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={7} className="px-6 py-8 text-center text-slate-400">
                     No hay usuarios
                   </td>
                 </tr>
@@ -288,19 +288,25 @@ export default function UsersPage() {
                 users.map((user) => {
                   const estado = getEstadoBadge(user);
                   return (
-                    <tr key={user.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 text-sm font-medium">{user.user_id}</td>
-                      <td className="px-6 py-4 text-sm">${user.credits}</td>
-                      <td className="px-6 py-4 text-sm">{getLastService(user)}</td>
+                    <tr key={user.id} className="hover:bg-slate-700/50 border-b border-slate-700">
+                      <td className="px-6 py-4 text-sm font-medium text-slate-200">{user.user_id}</td>
+                      <td className="px-6 py-4 text-sm text-slate-300">${user.credits}</td>
+                      <td className="px-6 py-4 text-sm text-slate-300">{getLastService(user)}</td>
                       <td className="px-6 py-4 text-sm">
-                        <span className={`px-2 py-1 rounded text-xs font-medium ${estado.color}`}>
+                        <span className={`px-2 py-1 rounded text-xs font-medium ${
+                          estado.text === 'Activo' 
+                            ? 'bg-green-900/40 text-green-300 border border-green-700'
+                            : estado.text === 'Suspendido'
+                            ? 'bg-red-900/40 text-red-300 border border-red-700'
+                            : 'bg-yellow-900/40 text-yellow-300 border border-yellow-700'
+                        }`}>
                           {estado.text}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-sm">
+                      <td className="px-6 py-4 text-sm text-slate-300">
                         {user.has_photo ? '✅ Sí' : '❌ No'}
                       </td>
-                      <td className="px-6 py-4 text-sm">
+                      <td className="px-6 py-4 text-sm text-slate-400">
                         {new Date(user.created_at).toLocaleDateString()}
                       </td>
                       <td className="px-6 py-4 text-right space-x-2">
@@ -314,66 +320,66 @@ export default function UsersPage() {
                               <Eye className="h-4 w-4" />
                             </Button>
                           </DialogTrigger>
-                          <DialogContent className="max-w-2xl">
+                          <DialogContent className="max-w-2xl bg-slate-800 border-slate-700">
                             <DialogHeader>
-                              <DialogTitle>Detalles del Usuario</DialogTitle>
+                              <DialogTitle className="text-slate-200">Detalles del Usuario</DialogTitle>
                             </DialogHeader>
                             {selectedUser && (
                               <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                  <p className="text-sm text-gray-600">ID de Base de Datos</p>
-                                  <p className="font-medium">{selectedUser.id}</p>
+                                  <p className="text-sm text-slate-400">ID de Base de Datos</p>
+                                  <p className="font-medium text-slate-200">{selectedUser.id}</p>
                                 </div>
                                 <div>
-                                  <p className="text-sm text-gray-600">User ID (Telegram)</p>
-                                  <p className="font-medium">{selectedUser.user_id}</p>
+                                  <p className="text-sm text-slate-400">User ID (Telegram)</p>
+                                  <p className="font-medium text-slate-200">{selectedUser.user_id}</p>
                                 </div>
                                 <div>
-                                  <p className="text-sm text-gray-600">Créditos</p>
-                                  <p className="font-medium text-lg text-green-600">
+                                  <p className="text-sm text-slate-400">Créditos</p>
+                                  <p className="font-medium text-lg text-green-400">
                                     ${selectedUser.credits}
                                   </p>
                                 </div>
                                 <div>
-                                  <p className="text-sm text-gray-600">Estado</p>
-                                  <p className="font-medium">{getEstadoBadge(selectedUser).text}</p>
+                                  <p className="text-sm text-slate-400">Estado</p>
+                                  <p className="font-medium text-slate-200">{getEstadoBadge(selectedUser).text}</p>
                                 </div>
                                 <div>
-                                  <p className="text-sm text-gray-600">Servicio Actual</p>
-                                  <p className="font-medium">{selectedUser.service || 'Ninguno'}</p>
+                                  <p className="text-sm text-slate-400">Servicio Actual</p>
+                                  <p className="font-medium text-slate-200">{selectedUser.service || 'Ninguno'}</p>
                                 </div>
                                 <div>
-                                  <p className="text-sm text-gray-600">Último Servicio</p>
-                                  <p className="font-medium">{getLastService(selectedUser)}</p>
+                                  <p className="text-sm text-slate-400">Último Servicio</p>
+                                  <p className="font-medium text-slate-200">{getLastService(selectedUser)}</p>
                                 </div>
                                 <div>
-                                  <p className="text-sm text-gray-600">Orden Activa</p>
-                                  <p className="font-medium">{selectedUser.order_id || 'Ninguna'}</p>
+                                  <p className="text-sm text-slate-400">Orden Activa</p>
+                                  <p className="font-medium text-slate-200">{selectedUser.order_id || 'Ninguna'}</p>
                                 </div>
                                 <div>
-                                  <p className="text-sm text-gray-600">Foto</p>
-                                  <p className="font-medium">{selectedUser.has_photo ? '✅ Sí' : '❌ No'}</p>
+                                  <p className="text-sm text-slate-400">Foto</p>
+                                  <p className="font-medium text-slate-200">{selectedUser.has_photo ? '✅ Sí' : '❌ No'}</p>
                                 </div>
                                 <div className="col-span-2">
-                                  <p className="text-sm text-gray-600">Fecha de Creación</p>
-                                  <p className="font-medium">
+                                  <p className="text-sm text-slate-400">Fecha de Creación</p>
+                                  <p className="font-medium text-slate-200">
                                     {new Date(selectedUser.created_at).toLocaleString()}
                                   </p>
                                 </div>
                                 <div className="col-span-2">
-                                  <p className="text-sm text-gray-600">Última Actualización</p>
-                                  <p className="font-medium">
+                                  <p className="text-sm text-slate-400">Última Actualización</p>
+                                  <p className="font-medium text-slate-200">
                                     {new Date(selectedUser.updated_at).toLocaleString()}
                                   </p>
                                 </div>
                                 {selectedUser.history && selectedUser.history.length > 0 && (
                                   <div className="col-span-2">
-                                    <p className="text-sm text-gray-600">Historial de Servicios</p>
+                                    <p className="text-sm text-slate-400">Historial de Servicios</p>
                                     <div className="flex flex-wrap gap-2 mt-2">
                                       {selectedUser.history.map((service, idx) => (
                                         <span
                                           key={idx}
-                                          className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs"
+                                          className="px-2 py-1 bg-blue-900/40 text-blue-300 border border-blue-700 rounded text-xs"
                                         >
                                           {service}
                                         </span>

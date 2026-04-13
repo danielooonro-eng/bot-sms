@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import {
   BarChart3,
   Users,
@@ -10,7 +11,8 @@ import {
   FileText,
   Home,
   LogOut,
-  Zap
+  Zap,
+  Shield
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -23,12 +25,36 @@ const navigation = [
   { name: 'Usuarios', href: '/admin/users', icon: Users },
   { name: 'Logs', href: '/admin/logs', icon: FileText },
   { name: 'Notificaciones', href: '/admin/notifications', icon: Bell },
+  { name: 'Administradores', href: '/admin/administradores', icon: Shield },
   { name: 'Configuración', href: '/admin/settings', icon: Settings },
 ]
 
 export function AdminSidebar() {
   const pathname = usePathname()
   const router = useRouter()
+  const [unreadCount, setUnreadCount] = useState(0)
+
+  useEffect(() => {
+    // Fetch initial count
+    fetchUnreadCount()
+
+    // Set up interval to refresh every 30 seconds
+    const interval = setInterval(fetchUnreadCount, 30000)
+
+    return () => clearInterval(interval)
+  }, [])
+
+  const fetchUnreadCount = async () => {
+    try {
+      const response = await fetch('/api/notifications/unread')
+      const result = await response.json()
+      if (result.success) {
+        setUnreadCount(result.count || 0)
+      }
+    } catch (error) {
+      console.error('Error fetching unread count:', error)
+    }
+  }
 
   const handleLogout = async () => {
     try {
@@ -71,9 +97,9 @@ export function AdminSidebar() {
               >
                 <Icon className="h-4 w-4" />
                 <span>{item.name}</span>
-                {item.name === 'Notificaciones' && (
-                  <span className="ml-auto bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                    0
+                {item.name === 'Notificaciones' && unreadCount > 0 && (
+                  <span className="ml-auto bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
+                    {unreadCount > 9 ? '9+' : unreadCount}
                   </span>
                 )}
               </div>

@@ -6,26 +6,23 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function GET(request: NextRequest) {
   try {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('notifications')
-      .delete()
-      .eq('id', params.id);
+      .select('id', { count: 'exact', head: true })
+      .eq('sent', false);
 
     if (error) throw error;
 
     return NextResponse.json({
       success: true,
-      message: 'Notificación eliminada correctamente',
+      count: data?.length || 0,
     });
   } catch (error: any) {
-    console.error('Error deleting notification:', error);
+    console.error('Error fetching unread notifications count:', error);
     return NextResponse.json(
-      { success: false, error: 'Error al eliminar notificación' },
+      { success: false, error: 'Error al cargar notificaciones', count: 0 },
       { status: 500 }
     );
   }
