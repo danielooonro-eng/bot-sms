@@ -95,7 +95,7 @@ export default function OrdersPage() {
   // Filter orders by search
   const filteredOrders = orders.filter(
     (order) =>
-      order.user_id.includes(search) ||
+      String(order.user_id).includes(search) ||
       order.order_id.includes(search) ||
       order.service.toLowerCase().includes(search.toLowerCase())
   )
