@@ -12,7 +12,8 @@ import {
   Home,
   LogOut,
   Zap,
-  Shield
+  Shield,
+  Clock
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -23,6 +24,7 @@ const navigation = [
   { name: 'Dashboard', href: '/admin/dashboard', icon: Home },
   { name: 'Analytics', href: '/admin/analytics', icon: BarChart3 },
   { name: 'Usuarios', href: '/admin/users', icon: Users },
+  { name: 'Órdenes Activas', href: '/admin/ordenes', icon: Clock },
   { name: 'Logs', href: '/admin/logs', icon: FileText },
   { name: 'Notificaciones', href: '/admin/notifications', icon: Bell },
   { name: 'Administradores', href: '/admin/administradores', icon: Shield },

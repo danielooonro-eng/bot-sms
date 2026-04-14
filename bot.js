@@ -993,29 +993,38 @@ async function waitForSMS(chatId, orderId) {
          return;
        }
 
-       attempts++;
+        attempts++;
 
-       // Timeout: 20 minutos (240 intentos x 5 seg)
-       if (attempts >= 240) {
-         clearInterval(interval);
+        // Timeout: 5 minutos (60 intentos x 5 seg)
+        if (attempts >= 60) {
+          clearInterval(interval);
 
-         try {
-           await axios.get(`${BASE_URL}/cancel/${orderId}`, {
-             headers: { Authorization: `Bearer ${API_KEY}` }
-           });
-           user.credits++;
-           user.history.push('+1 crédito (timeout 20min)');
-         } catch { /* si falla la cancelación en 5sim, no devolver crédito */ }
+          try {
+            await axios.get(`${BASE_URL}/cancel/${orderId}`, {
+              headers: { Authorization: `Bearer ${API_KEY}` }
+            });
+            user.credits++;
+            user.history.push('+1 crédito (timeout 5min)');
+            
+            // Sincronizar cancelación por timeout con Supabase
+            syncUserToSupabase(chatId, user).catch(err => {
+              console.error('Error sincronizando timeout:', err.message);
+            });
+            addLogEntry(chatId, 'order_timeout_cancelled', user.service, 'success');
+          } catch (err) { 
+            console.error(`Error cancelando orden ${orderId} en 5sim:`, err.message);
+            addLogEntry(chatId, 'order_timeout_cancel_failed', user.service, 'error');
+          }
 
-         user.orderId = null;
-         user.messageId = null;
-         saveUsers();
+          user.orderId = null;
+          user.messageId = null;
+          saveUsers();
 
-         await editSmsMsg(
-           `⌛ *Tiempo agotado (20 min)*\n\nNo se recibió ningún código. La orden fue cancelada y tu crédito fue devuelto.`,
-           [[{ text: '🏠  Inicio', callback_data: 'start' }]]
-         );
-       }
+          await editSmsMsg(
+            `⌛ *Tiempo agotado (5 min)*\n\nNo se recibió ningún código. La orden fue cancelada y tu crédito fue devuelto.`,
+            [[{ text: '🏠  Inicio', callback_data: 'start' }]]
+          );
+        }
 
      } catch (err) {
        // 🔥 DEBUG: Loguear errores de 5sim con detalles completos
