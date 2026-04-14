@@ -33,11 +33,13 @@ const supabase = createClient(
 // =============================
 const DB_PATH = path.join(__dirname, 'users.json');
 
-function loadUsers() {
+// ⚠️ CRÍTICO: Carga SOLO desde JSON como fallback (NUNCA para reemplazar Supabase)
+function loadUsersFromJSON() {
   try {
     if (fs.existsSync(DB_PATH)) {
       const raw = fs.readFileSync(DB_PATH, 'utf8');
       const obj = JSON.parse(raw);
+      console.log('📄 Usuarios cargados desde JSON (FALLBACK)');
       return new Map(Object.entries(obj).map(([k, v]) => [parseInt(k), v]));
     }
   } catch (err) {
@@ -55,6 +57,54 @@ function saveUsers() {
     fs.writeFileSync(DB_PATH, JSON.stringify(obj, null, 2), 'utf8');
   } catch (err) {
     console.error('Error guardando users.json:', err.message);
+  }
+}
+
+// 🔥 NUEVO: Cargar usuarios DESDE SUPABASE (fuente primaria)
+async function loadUsersFromSupabase() {
+  try {
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
+      console.warn('⚠️ Supabase no está configurado, usando fallback JSON');
+      return loadUsersFromJSON();
+    }
+
+    console.log('🔄 Cargando usuarios desde Supabase...');
+    
+    const { data, error } = await supabase
+      .from('users')
+      .select('user_id, credits, order_id, service, has_photo');
+
+    if (error) {
+      console.error('❌ Error cargando usuarios de Supabase:', error.message);
+      console.log('📄 Usando fallback JSON');
+      return loadUsersFromJSON();
+    }
+
+    if (!data || data.length === 0) {
+      console.log('📭 No hay usuarios en Supabase aún');
+      return new Map();
+    }
+
+    // Convertir datos de Supabase al formato local
+    const usersMap = new Map();
+    for (const row of data) {
+      usersMap.set(row.user_id, {
+        credits: row.credits || 0,
+        orderId: row.order_id || null,
+        history: [], // La historia se guarda en logs, no en users
+        service: row.service || null,
+        hasPhoto: row.has_photo || false,
+        messageId: null // Esto es temporal, no se guarda
+      });
+    }
+
+    console.log(`✅ Cargados ${usersMap.size} usuarios desde Supabase`);
+    return usersMap;
+
+  } catch (err) {
+    console.error('❌ Exception cargando usuarios de Supabase:', err.message);
+    console.log('📄 Usando fallback JSON');
+    return loadUsersFromJSON();
   }
 }
 
@@ -119,20 +169,26 @@ async function addLogEntry(userId, action, service = null, status = 'success') {
   }
 }
 
-const users = loadUsers();
+// Variable global para almacenar usuarios
+let users = new Map();
 
-// Limpiar órdenes activas al arrancar (por si el bot se apagó con una en curso)
+// Función para limpiar órdenes activas al arrancar
+// ⚠️ CRÍTICO: SOLO cancela órdenes pendientes en 5sim, NO sincroniza desde JSON
 async function cancelPendingOrders() {
   let cancelled = 0;
+  console.log('🔍 Revisando órdenes pendientes...');
+  
   for (const [id, user] of users.entries()) {
     if (user.orderId) {
       try {
+        console.log(`⏳ Cancelando orden ${user.orderId} del usuario ${id}...`);
         await axios.get(`${BASE_URL}/cancel/${user.orderId}`, {
           headers: { Authorization: `Bearer ${process.env.FIVESIM_API}` }
         });
         user.credits++;
+        user.history = user.history || [];
         user.history.push('+1 crédito (cancelado al reiniciar bot)');
-        console.log(`Orden ${user.orderId} del usuario ${id} cancelada`);
+        console.log(`✅ Orden ${user.orderId} cancelada, crédito devuelto a usuario ${id}`);
         cancelled++;
         
         // Sincronizar en background sin await
@@ -140,17 +196,35 @@ async function cancelPendingOrders() {
           console.error(`Error en sync:`, err.message);
         });
       } catch {
-        console.log(`No se pudo cancelar orden ${user.orderId} del usuario ${id} en 5sim`);
+        console.log(`⚠️ No se pudo cancelar orden ${user.orderId} del usuario ${id} en 5sim`);
       }
       user.orderId = null;
       user.messageId = null;
     }
   }
   if (cancelled > 0) saveUsers();
-  console.log(`Ordenes pendientes canceladas al arrancar: ${cancelled}`);
+  console.log(`✅ Revisión de órdenes completada: ${cancelled} canceladas`);
 }
 
-cancelPendingOrders();
+// 🔥 INICIO ASINCRÓNICO - CARGA DESDE SUPABASE PRIMERO
+async function initializeBot() {
+  console.log('🚀 Inicializando bot...');
+  
+  // Cargar usuarios DESDE SUPABASE (fuente primaria)
+  users = await loadUsersFromSupabase();
+  
+  // Cancelar órdenes pendientes (no sincroniza datos, solo limpia 5sim)
+  await cancelPendingOrders();
+  
+  console.log('✅ Bot inicializado correctamente');
+  console.log(`📊 ${users.size} usuarios en memoria`);
+}
+
+// Ejecutar inicialización
+initializeBot().catch(err => {
+  console.error('❌ Error fatal inicializando bot:', err.message);
+  process.exit(1);
+});
 
 function getUser(id) {
   if (!users.has(id)) {
