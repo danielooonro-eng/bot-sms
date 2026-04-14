@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
           cancelled_by: adminEmail,
           cancelled_in_5sim: cancelledIn5sim,
         },
-        admin_id: session?.id || null,
+        admin_id: session?.email || null,
       })
 
     if (logError) {
