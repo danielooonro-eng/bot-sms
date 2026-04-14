@@ -914,7 +914,10 @@ async function waitForSMS(chatId, orderId) {
   // Edita el mensaje guardado en user, ignorando errores si fue borrado
   async function editSmsMsg(text, keyboard) {
     const user = getUser(chatId);
-    if (!user.messageId) return;
+    if (!user.messageId) {
+      console.log(`[waitForSMS] No hay messageId para editar (chatId=${chatId})`);
+      return false;
+    }
 
     const opts = {
       chat_id: chatId,
@@ -929,8 +932,11 @@ async function waitForSMS(chatId, orderId) {
       } else {
         await bot.editMessageText(text, opts);
       }
+      console.log(`[waitForSMS] Mensaje actualizado correctamente (chatId=${chatId}, messageId=${user.messageId})`);
+      return true;
     } catch (e) {
-      // Mensaje borrado o ya editado — ignorar silenciosamente
+      console.error(`[waitForSMS] Error al editar mensaje (chatId=${chatId}, messageId=${user.messageId}):`, e.message);
+      return false;
     }
   }
 
@@ -969,29 +975,47 @@ async function waitForSMS(chatId, orderId) {
           // 5sim puede devolver el código en .code o dentro del texto en .text
           const code = sms.code || extractCode(sms.text) || sms.text || 'No detectado';
           console.log(`[SMS] Código extraído: ${code} | raw:`, sms);
+          console.log(`[waitForSMS] Código detectado. Iniciando envío a Telegram (chatId=${chatId}, orderId=${orderId})`);
+
+          clearInterval(interval);
+
+          const successText =
+            `🎉 *¡Código recibido!*\n` +
+            `━━━━━━━━━━━━━━━━━━\n` +
+            `🔐 Código: \`${code}\``;
+
+          let notified = await editSmsMsg(
+            successText,
+            [[{ text: '🏠  Inicio', callback_data: 'start' }]]
+          );
+
+          if (!notified) {
+            try {
+              console.log(`[waitForSMS] Fallback a bot.sendMessage para chatId=${chatId}`);
+              await bot.sendMessage(chatId, `✅ Código recibido: ${code}`, {
+                reply_markup: { inline_keyboard: [[{ text: '🏠  Inicio', callback_data: 'start' }]] }
+              });
+              notified = true;
+              console.log(`[waitForSMS] Código enviado con bot.sendMessage (chatId=${chatId})`);
+            } catch (sendErr) {
+              console.error(`[waitForSMS] Error enviando código con sendMessage (chatId=${chatId}):`, sendErr.message);
+            }
+          }
 
           user.history = user.history || [];
           user.history.push(`Código: ${code}`);
           user.orderId = null;
           user.messageId = null;
           saveUsers();
-          
+
           // Sincronizar con Supabase
           syncUserToSupabase(chatId, user).catch(err => {
             console.error('Error sincronizando SMS:', err.message);
           });
-          addLogEntry(chatId, 'sms_received', null, 'success');
-          
-          clearInterval(interval);
+          addLogEntry(chatId, 'sms_received', null, notified ? 'success' : 'error');
 
-         await editSmsMsg(
-           `🎉 *¡Código recibido!*\n` +
-           `━━━━━━━━━━━━━━━━━━\n` +
-           `🔐 Código: \`${code}\``,
-           [[{ text: '🏠  Inicio', callback_data: 'start' }]]
-         );
-         return;
-       }
+          return;
+        }
 
         attempts++;
 
