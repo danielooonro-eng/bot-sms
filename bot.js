@@ -772,61 +772,92 @@ bot.on('callback_query', async (query) => {
       );
     }
 
-    try {
-      const operator = (OPERATORS[user.service]?.[country]) || 'any';
-      const res = await axios.get(
-        `${BASE_URL}/buy/activation/${country}/${operator}/${user.service}`,
-        { headers: { Authorization: `Bearer ${API_KEY}` } }
-      );
+     try {
+       // 🔥 DEBUG: Validar que API_KEY existe
+       if (!API_KEY) {
+         console.error('❌ ERROR CRÍTICO: API_KEY (FIVESIM_API) no está configurada en .env');
+         return editMsg(query,
+           `❌ *Error de configuración*\n\nLa API de 5sim no está configurada. Contacta al administrador.`,
+           { inline_keyboard: [[{ text: '🏠  Inicio', callback_data: 'start' }]] }
+         );
+       }
 
-      const order = res.data;
-      const phone = order.phone || order.number || null;
+       const operator = (OPERATORS[user.service]?.[country]) || 'any';
+       const url = `${BASE_URL}/buy/activation/${country}/${operator}/${user.service}`;
+       
+       // 🔥 DEBUG: Loguear parámetros antes de hacer la solicitud
+       console.log(`\n🛒 ━━━ COMPRANDO NÚMERO ━━━`);
+       console.log(`   Service: ${user.service}`);
+       console.log(`   Country: ${country}`);
+       console.log(`   Operator: ${operator}`);
+       console.log(`   URL: ${url}`);
+       console.log(`   API Key present: ${API_KEY ? '✅ SÍ' : '❌ NO'}`);
 
-      if (!phone) {
-        return editMsg(query,
-          `❌ No hay números disponibles para *${COUNTRY_FLAGS[country] || country}* en este momento.`,
-          { inline_keyboard: [[{ text: '🔙  Volver', callback_data: 'buy' }]] }
-        );
-      }
+       const res = await axios.get(url, {
+         headers: { Authorization: `Bearer ${API_KEY}` }
+       });
 
-      const price = (PRICES[user.service] || {})[country] || '?';
-      user.orderId = order.id;
-      user.messageId = query.message.message_id;
-      user.hasPhoto = !!(query.message.photo || query.message.document);
-      user.credits--;
-      user.history = user.history || [];
-      user.history.push(`-1 crédito | ${user.service} (${country}) $${price}`);
-      saveUsers();
-      
-      // Sincronizar con Supabase en background
-      syncUserToSupabase(chatId, user).catch(err => {
-        console.error('Error sincronizando compra:', err.message);
-      });
-      addLogEntry(chatId, 'number_rented', user.service, 'success');
+       // 🔥 DEBUG: Loguear respuesta exitosa
+       console.log(`✅ Respuesta 5sim exitosa:`, JSON.stringify(res.data, null, 2));
 
-      await editMsg(query,
-        `✅ *Número asignado*\n` +
-        `━━━━━━━━━━━━━━━━━━\n` +
-        `📱 Número: \`${phone}\`\n` +
-        `🌍 País: ${COUNTRY_FLAGS[country] || country}\n` +
-        `💵 Precio: *$${price}*\n` +
-        `💰 Créditos restantes: *${user.credits}*\n\n` +
-        `⏳ _Esperando el código SMS..._`,
-        {
-          inline_keyboard: [
-            [{ text: '❌  Cancelar y devolver crédito', callback_data: 'cancel' }]
-          ]
-        }
-      );
+       const order = res.data;
+       const phone = order.phone || order.number || null;
 
-      waitForSMS(chatId, order.id);
+       if (!phone) {
+         console.warn(`⚠️ Sin teléfono en respuesta de 5sim: ${JSON.stringify(order)}`);
+         return editMsg(query,
+           `❌ No hay números disponibles para *${COUNTRY_FLAGS[country] || country}* en este momento.`,
+           { inline_keyboard: [[{ text: '🔙  Volver', callback_data: 'buy' }]] }
+         );
+       }
 
-    } catch (err) {
-      editMsg(query,
-        `⚠️ *Error al obtener número*\n\n_${err.response?.data?.message || 'Servicio no disponible'}_`,
-        { inline_keyboard: [[{ text: '🔙  Volver', callback_data: 'buy' }]] }
-      );
-    }
+       const price = (PRICES[user.service] || {})[country] || '?';
+       user.orderId = order.id;
+       user.messageId = query.message.message_id;
+       user.hasPhoto = !!(query.message.photo || query.message.document);
+       user.credits--;
+       user.history = user.history || [];
+       user.history.push(`-1 crédito | ${user.service} (${country}) $${price}`);
+       saveUsers();
+       
+       // Sincronizar con Supabase en background
+       syncUserToSupabase(chatId, user).catch(err => {
+         console.error('Error sincronizando compra:', err.message);
+       });
+       addLogEntry(chatId, 'number_rented', user.service, 'success');
+
+       await editMsg(query,
+         `✅ *Número asignado*\n` +
+         `━━━━━━━━━━━━━━━━━━\n` +
+         `📱 Número: \`${phone}\`\n` +
+         `🌍 País: ${COUNTRY_FLAGS[country] || country}\n` +
+         `💵 Precio: *$${price}*\n` +
+         `💰 Créditos restantes: *${user.credits}*\n\n` +
+         `⏳ _Esperando el código SMS..._`,
+         {
+           inline_keyboard: [
+             [{ text: '❌  Cancelar y devolver crédito', callback_data: 'cancel' }]
+           ]
+         }
+       );
+
+       waitForSMS(chatId, order.id);
+
+     } catch (err) {
+       // 🔥 DEBUG: Loguear error completo con detalles
+       console.error(`\n❌ ━━━ ERROR AL COMPRAR NÚMERO ━━━`);
+       console.error(`   Service: ${user.service}`);
+       console.error(`   Country: ${country}`);
+       console.error(`   Status HTTP: ${err.response?.status || err.code || 'N/A'}`);
+       console.error(`   Mensaje error: ${err.response?.data?.message || err.message}`);
+       console.error(`   Data completa:`, JSON.stringify(err.response?.data || err, null, 2));
+       
+       const errorMessage = err.response?.data?.message || err.message || 'Servicio no disponible';
+       editMsg(query,
+         `⚠️ *Error al obtener número*\n\n_${errorMessage}_`,
+         { inline_keyboard: [[{ text: '🔙  Volver', callback_data: 'buy' }]] }
+       );
+     }
   }
 
   // ── CANCELAR ──
@@ -912,73 +943,88 @@ async function waitForSMS(chatId, orderId) {
       return;
     }
 
-    try {
-      const res = await axios.get(`${BASE_URL}/check/${orderId}`, {
-        headers: { Authorization: `Bearer ${API_KEY}` }
-      });
+     try {
+       // 🔥 DEBUG: Validar API_KEY antes de hacer solicitud
+       if (!API_KEY) {
+         console.error('❌ ERROR: API_KEY no configurada en waitForSMS');
+         return;
+       }
 
-      const data = res.data;
+       const res = await axios.get(`${BASE_URL}/check/${orderId}`, {
+         headers: { Authorization: `Bearer ${API_KEY}` }
+       });
 
-      // LOG para depuración — ver qué devuelve 5sim
-      console.log(`[SMS Check] orderId=${orderId} status=${data.status} sms=${JSON.stringify(data.sms)}`);
+       const data = res.data;
 
+       // 🔥 DEBUG: LOG detallado para depuración — ver qué devuelve 5sim
+       console.log(`\n✅ [SMS Check] orderId=${orderId}`);
+       console.log(`   Status: ${data.status}`);
+       console.log(`   SMS recibido: ${data.sms && data.sms.length > 0 ? '✅ SÍ' : '⏳ ESPERANDO'}`);
        if (data.sms && data.sms.length > 0) {
-         const sms = data.sms[0];
-         // 5sim puede devolver el código en .code o dentro del texto en .text
-         const code = sms.code || extractCode(sms.text) || sms.text || 'No detectado';
-         console.log(`[SMS] Código extraído: ${code} | raw:`, sms);
+         console.log(`   SMS data:`, JSON.stringify(data.sms[0], null, 2));
+       }
 
-         user.history = user.history || [];
-         user.history.push(`Código: ${code}`);
+        if (data.sms && data.sms.length > 0) {
+          const sms = data.sms[0];
+          // 5sim puede devolver el código en .code o dentro del texto en .text
+          const code = sms.code || extractCode(sms.text) || sms.text || 'No detectado';
+          console.log(`[SMS] Código extraído: ${code} | raw:`, sms);
+
+          user.history = user.history || [];
+          user.history.push(`Código: ${code}`);
+          user.orderId = null;
+          user.messageId = null;
+          saveUsers();
+          
+          // Sincronizar con Supabase
+          syncUserToSupabase(chatId, user).catch(err => {
+            console.error('Error sincronizando SMS:', err.message);
+          });
+          addLogEntry(chatId, 'sms_received', null, 'success');
+          
+          clearInterval(interval);
+
+         await editSmsMsg(
+           `🎉 *¡Código recibido!*\n` +
+           `━━━━━━━━━━━━━━━━━━\n` +
+           `🔐 Código: \`${code}\``,
+           [[{ text: '🏠  Inicio', callback_data: 'start' }]]
+         );
+         return;
+       }
+
+       attempts++;
+
+       // Timeout: 20 minutos (240 intentos x 5 seg)
+       if (attempts >= 240) {
+         clearInterval(interval);
+
+         try {
+           await axios.get(`${BASE_URL}/cancel/${orderId}`, {
+             headers: { Authorization: `Bearer ${API_KEY}` }
+           });
+           user.credits++;
+           user.history.push('+1 crédito (timeout 20min)');
+         } catch { /* si falla la cancelación en 5sim, no devolver crédito */ }
+
          user.orderId = null;
          user.messageId = null;
          saveUsers();
-         
-         // Sincronizar con Supabase
-         syncUserToSupabase(chatId, user).catch(err => {
-           console.error('Error sincronizando SMS:', err.message);
-         });
-         addLogEntry(chatId, 'sms_received', null, 'success');
-         
-         clearInterval(interval);
 
-        await editSmsMsg(
-          `🎉 *¡Código recibido!*\n` +
-          `━━━━━━━━━━━━━━━━━━\n` +
-          `🔐 Código: \`${code}\``,
-          [[{ text: '🏠  Inicio', callback_data: 'start' }]]
-        );
-        return;
-      }
+         await editSmsMsg(
+           `⌛ *Tiempo agotado (20 min)*\n\nNo se recibió ningún código. La orden fue cancelada y tu crédito fue devuelto.`,
+           [[{ text: '🏠  Inicio', callback_data: 'start' }]]
+         );
+       }
 
-      attempts++;
-
-      // Timeout: 20 minutos (240 intentos x 5 seg)
-      if (attempts >= 240) {
-        clearInterval(interval);
-
-        try {
-          await axios.get(`${BASE_URL}/cancel/${orderId}`, {
-            headers: { Authorization: `Bearer ${API_KEY}` }
-          });
-          user.credits++;
-          user.history.push('+1 crédito (timeout 20min)');
-        } catch { /* si falla la cancelación en 5sim, no devolver crédito */ }
-
-        user.orderId = null;
-        user.messageId = null;
-        saveUsers();
-
-        await editSmsMsg(
-          `⌛ *Tiempo agotado (20 min)*\n\nNo se recibió ningún código. La orden fue cancelada y tu crédito fue devuelto.`,
-          [[{ text: '🏠  Inicio', callback_data: 'start' }]]
-        );
-      }
-
-    } catch (err) {
-      // Error en el check — no cortar el intervalo, reintentar en el siguiente ciclo
-      console.log(`[SMS Check ERROR] orderId=${orderId}`, err?.response?.data || err.message);
-    }
+     } catch (err) {
+       // 🔥 DEBUG: Loguear errores de 5sim con detalles completos
+       console.error(`\n❌ [SMS Check ERROR] orderId=${orderId}`);
+       console.error(`   Status HTTP: ${err.response?.status || err.code || 'N/A'}`);
+       console.error(`   Mensaje: ${err.response?.data?.message || err.message}`);
+       console.error(`   Data completa:`, JSON.stringify(err.response?.data || err, null, 2));
+       // Error en el check — no cortar el intervalo, reintentar en el siguiente ciclo
+     }
   }, 5000);
 }
 
