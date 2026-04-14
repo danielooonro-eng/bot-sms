@@ -4,9 +4,19 @@ import { useEffect, useState } from 'react'
 import { Clock, User } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
 
+interface UserInfo {
+  email: string
+  name: string
+  role: string
+  id: string
+}
+
 export function AdminHeader() {
   const [time, setTime] = useState('')
+  const [user, setUser] = useState<UserInfo | null>(null)
+  const [loading, setLoading] = useState(true)
 
+  // Fetch time
   useEffect(() => {
     const updateTime = () => {
       const now = new Date()
@@ -20,6 +30,27 @@ export function AdminHeader() {
     updateTime()
     const interval = setInterval(updateTime, 1000)
     return () => clearInterval(interval)
+  }, [])
+
+  // Fetch user info from /api/auth/me
+  useEffect(() => {
+    const fetchUserInfo = async () => {
+      try {
+        const response = await fetch('/api/auth/me')
+        if (response.ok) {
+          const data = await response.json()
+          setUser(data.data)
+        } else {
+          console.error('Failed to fetch user info:', response.status)
+        }
+      } catch (error) {
+        console.error('Error fetching user info:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchUserInfo()
   }, [])
 
   return (
@@ -36,8 +67,8 @@ export function AdminHeader() {
             <User className="h-4 w-4 text-white" />
           </div>
           <div className="hidden sm:block">
-            <p className="text-sm font-medium text-white">Admin</p>
-            <p className="text-xs text-slate-400">danielooonro@gmail.com</p>
+            <p className="text-sm font-medium text-white">{loading ? 'Cargando...' : (user?.name || 'Admin')}</p>
+            <p className="text-xs text-slate-400">{loading ? '...' : (user?.email || 'No disponible')}</p>
           </div>
         </div>
       </div>
