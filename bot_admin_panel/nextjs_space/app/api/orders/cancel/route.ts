@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getSession } from '@/lib/auth'
-import axios from 'axios'
 
 export async function POST(request: NextRequest) {
   try {
@@ -65,7 +64,8 @@ export async function POST(request: NextRequest) {
     let cancelledIn5sim = false
     if (fivesimApi) {
       try {
-        await axios.get(`https://5sim.net/v1/user/cancel/${orderId}`, {
+        await fetch(`https://5sim.net/v1/user/cancel/${orderId}`, {
+          method: 'GET',
           headers: { Authorization: `Bearer ${fivesimApi}` }
         })
         cancelledIn5sim = true
