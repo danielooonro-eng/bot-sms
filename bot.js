@@ -995,8 +995,8 @@ async function waitForSMS(chatId, orderId) {
 
         attempts++;
 
-        // Timeout: 5 minutos (60 intentos x 5 seg)
-        if (attempts >= 60) {
+        // Timeout: 5 minutos (300 intentos x 1 seg)
+        if (attempts >= 300) {
           clearInterval(interval);
 
           try {
@@ -1034,7 +1034,7 @@ async function waitForSMS(chatId, orderId) {
        console.error(`   Data completa:`, JSON.stringify(err.response?.data || err, null, 2));
        // Error en el check — no cortar el intervalo, reintentar en el siguiente ciclo
      }
-  }, 5000);
+  }, 1000);
 }
 
 // =============================
