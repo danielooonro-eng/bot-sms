@@ -286,7 +286,7 @@ export default function NotificationsPage() {
               {notifications.map((notif) => (
                 <div
                   key={notif.id}
-                  className="flex items-start justify-between p-3 border rounded-lg hover:bg-gray-50"
+                  className="flex items-start justify-between p-3 border rounded-lg hover:bg-slate-700"
                 >
                   <div className="flex-1">
                     <h3 className="font-semibold">{notif.title}</h3>

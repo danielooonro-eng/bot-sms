@@ -241,7 +241,7 @@ export default function DashboardPage() {
             {activities.map((activity) => (
               <div
                 key={activity.id}
-                className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
+                className="flex items-center justify-between p-4 border rounded-lg hover:bg-slate-700"
               >
                 <div className="flex-1">
                   <p className="font-medium">Usuario #{activity.user_id}</p>

@@ -231,7 +231,7 @@ export default function LogsPage() {
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-50 border-b">
+            <thead className="bg-slate-800 border-b">
               <tr>
                 <th className="px-6 py-3 text-left text-sm font-semibold">User ID</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold">Acción</th>
@@ -257,7 +257,7 @@ export default function LogsPage() {
                 logs.map((log) => {
                   const statusBadge = getStatusBadge(log.status);
                   return (
-                    <tr key={log.id} className="hover:bg-gray-50">
+                    <tr key={log.id} className="hover:bg-slate-700">
                       <td className="px-6 py-4 text-sm font-medium">{log.user_id}</td>
                       <td className="px-6 py-4 text-sm">{log.action}</td>
                       <td className="px-6 py-4 text-sm">{log.service}</td>

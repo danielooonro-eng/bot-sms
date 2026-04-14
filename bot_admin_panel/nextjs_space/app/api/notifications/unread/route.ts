@@ -8,7 +8,7 @@ const supabase = createClient(
 
 export async function GET(request: NextRequest) {
   try {
-    const { data, error } = await supabase
+    const { count, error } = await supabase
       .from('notifications')
       .select('id', { count: 'exact', head: true })
       .eq('sent', false);
@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      count: data?.length || 0,
+      count: count || 0,
     });
   } catch (error: any) {
     console.error('Error fetching unread notifications count:', error);
