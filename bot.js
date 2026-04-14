@@ -29,7 +29,7 @@ const supabase = createClient(
 );
 
 // =============================
-// PERSISTENCIA EN ARCHIVO JSON
+// PERSISTENCIA EN SUPABASE + FALLBACK JSON
 // =============================
 const DB_PATH = path.join(__dirname, 'users.json');
 
@@ -58,6 +58,67 @@ function saveUsers() {
   }
 }
 
+// Async functions para Supabase (se ejecutan en background sin bloquear)
+async function syncUserToSupabase(userId, userData) {
+  try {
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
+      console.warn('⚠️ Supabase no está configurado, usando solo JSON');
+      return false;
+    }
+
+    const { data, error } = await supabase
+      .from('users')
+      .upsert({
+        user_id: userId,
+        credits: userData.credits || 0,
+        order_id: userData.orderId || null,
+        service: userData.service || null,
+        has_photo: userData.hasPhoto || false,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' })
+      .select();
+
+    if (error) {
+      console.error(`❌ Error sincronizando usuario ${userId}:`, error.message);
+      return false;
+    }
+    
+    console.log(`✅ Usuario ${userId} sincronizado a Supabase`);
+    return true;
+  } catch (err) {
+    console.error(`❌ Exception sincronizando usuario ${userId}:`, err.message);
+    return false;
+  }
+}
+
+async function addLogEntry(userId, action, service = null, status = 'success') {
+  try {
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
+      return false;
+    }
+
+    const { error } = await supabase
+      .from('logs')
+      .insert({
+        user_id: userId,
+        action,
+        service,
+        status,
+        created_at: new Date().toISOString(),
+      });
+
+    if (error) {
+      console.error(`❌ Error agregando log:`, error.message);
+      return false;
+    }
+    
+    return true;
+  } catch (err) {
+    console.error(`❌ Exception agregando log:`, err.message);
+    return false;
+  }
+}
+
 const users = loadUsers();
 
 // Limpiar órdenes activas al arrancar (por si el bot se apagó con una en curso)
@@ -73,6 +134,11 @@ async function cancelPendingOrders() {
         user.history.push('+1 crédito (cancelado al reiniciar bot)');
         console.log(`Orden ${user.orderId} del usuario ${id} cancelada`);
         cancelled++;
+        
+        // Sincronizar en background sin await
+        syncUserToSupabase(id, user).catch(err => {
+          console.error(`Error en sync:`, err.message);
+        });
       } catch {
         console.log(`No se pudo cancelar orden ${user.orderId} del usuario ${id} en 5sim`);
       }
@@ -92,11 +158,31 @@ function getUser(id) {
       credits: 0,
       orderId: null,
       history: [],
-      service: null
+      service: null,
+      hasPhoto: false
     });
     saveUsers();
+    
+    // Sincronizar en background sin bloquear
+    syncUserToSupabase(id, users.get(id)).catch(err => {
+      console.error(`Error en sync inicial:`, err.message);
+    });
   }
   return users.get(id);
+}
+
+// Función helper para actualizar después de sincroniación
+function updateAndSyncUser(id, callback) {
+  const user = getUser(id);
+  callback(user);
+  saveUsers();
+  
+  // Sincronizar en background
+  syncUserToSupabase(id, user).catch(err => {
+    console.error(`Error sincronizando ${id}:`, err.message);
+  });
+  
+  return user;
 }
 
 const SERVICES = {
@@ -456,10 +542,14 @@ bot.onText(/\/addcredits (\d+) (\d+)/, (msg, match) => {
   const userId = parseInt(match[1]);
   const amount = parseInt(match[2]);
 
-  const user = getUser(userId);
-  user.credits += amount;
-  user.history.push(`+${amount} créditos (admin)`);
-  saveUsers();
+  updateAndSyncUser(userId, (user) => {
+    user.credits += amount;
+    user.history = user.history || [];
+    user.history.push(`+${amount} créditos (admin)`);
+  });
+  
+  // Agregar log
+  addLogEntry(userId, 'credits_added', 'admin', 'success');
 
   bot.sendMessage(msg.chat.id, `✅ *${amount} créditos* agregados al usuario \`${userId}\``, { parse_mode: 'Markdown' });
   bot.sendMessage(userId, `🎉 Recibiste *${amount} créditos* en LittlePay 🐣`, { parse_mode: 'Markdown' });
@@ -630,8 +720,15 @@ bot.on('callback_query', async (query) => {
       user.messageId = query.message.message_id;
       user.hasPhoto = !!(query.message.photo || query.message.document);
       user.credits--;
+      user.history = user.history || [];
       user.history.push(`-1 crédito | ${user.service} (${country}) $${price}`);
       saveUsers();
+      
+      // Sincronizar con Supabase en background
+      syncUserToSupabase(chatId, user).catch(err => {
+        console.error('Error sincronizando compra:', err.message);
+      });
+      addLogEntry(chatId, 'number_rented', user.service, 'success');
 
       await editMsg(query,
         `✅ *Número asignado*\n` +
@@ -668,9 +765,16 @@ bot.on('callback_query', async (query) => {
       });
 
       user.credits++;
+      user.history = user.history || [];
       user.history.push('+1 crédito (cancelado)');
       user.orderId = null;
       saveUsers();
+      
+      // Sincronizar con Supabase
+      syncUserToSupabase(chatId, user).catch(err => {
+        console.error('Error sincronizando cancelación:', err.message);
+      });
+      addLogEntry(chatId, 'order_cancelled', null, 'success');
 
       editMsg(query,
         `🔄 *Orden cancelada*\n\nTu crédito ha sido devuelto. Créditos actuales: *${user.credits}*`,
@@ -744,17 +848,25 @@ async function waitForSMS(chatId, orderId) {
       // LOG para depuración — ver qué devuelve 5sim
       console.log(`[SMS Check] orderId=${orderId} status=${data.status} sms=${JSON.stringify(data.sms)}`);
 
-      if (data.sms && data.sms.length > 0) {
-        const sms = data.sms[0];
-        // 5sim puede devolver el código en .code o dentro del texto en .text
-        const code = sms.code || extractCode(sms.text) || sms.text || 'No detectado';
-        console.log(`[SMS] Código extraído: ${code} | raw:`, sms);
+       if (data.sms && data.sms.length > 0) {
+         const sms = data.sms[0];
+         // 5sim puede devolver el código en .code o dentro del texto en .text
+         const code = sms.code || extractCode(sms.text) || sms.text || 'No detectado';
+         console.log(`[SMS] Código extraído: ${code} | raw:`, sms);
 
-        user.history.push(`Código: ${code}`);
-        user.orderId = null;
-        user.messageId = null;
-        saveUsers();
-        clearInterval(interval);
+         user.history = user.history || [];
+         user.history.push(`Código: ${code}`);
+         user.orderId = null;
+         user.messageId = null;
+         saveUsers();
+         
+         // Sincronizar con Supabase
+         syncUserToSupabase(chatId, user).catch(err => {
+           console.error('Error sincronizando SMS:', err.message);
+         });
+         addLogEntry(chatId, 'sms_received', null, 'success');
+         
+         clearInterval(interval);
 
         await editSmsMsg(
           `🎉 *¡Código recibido!*\n` +

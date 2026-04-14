@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
 import { getSession } from '@/lib/auth'
 import { successResponse } from '@/lib/api-utils'
-import { AuditLog } from '@/lib/types'
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+)
 
 export async function GET(request: NextRequest) {
   try {
@@ -12,42 +17,60 @@ export async function GET(request: NextRequest) {
     }
 
     const searchParams = request.nextUrl.searchParams
-    const action = searchParams.get('action') || 'all'
+    const action = searchParams.get('action')
+    const search = searchParams.get('search')
+    const status = searchParams.get('status')
+    const startDate = searchParams.get('startDate')
+    const endDate = searchParams.get('endDate')
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '50')
+    const offset = (page - 1) * limit
 
-    // TODO: Fetch from Supabase
-    // For now, return mock data
-    const logs: AuditLog[] = [
-      {
-        id: '1',
-        action: 'number_rented',
-        user_id: '8349475987',
-        admin_id: 'system',
-        description: 'Usuario rentó número para Google (USA)',
-        metadata: { service: 'google', country: 'usa', price: 8 },
-        created_at: new Date('2024-04-10T12:30:00'),
-      },
-      {
-        id: '2',
-        action: 'user_created',
-        user_id: '8349475987',
-        admin_id: 'system',
-        description: 'Nuevo usuario registrado',
-        metadata: { telegram_id: 8349475987 },
-        created_at: new Date('2024-01-15T10:00:00'),
-      },
-    ]
+    // Build query
+    let query = supabase
+      .from('logs')
+      .select('*')
+      .order('created_at', { ascending: false })
 
-    const filtered = action === 'all' ? logs : logs.filter(l => l.action === action)
+    // Apply filters
+    if (search) {
+      query = query.or(`user_id.ilike.%${search}%,action.ilike.%${search}%`)
+    }
+
+    if (action && action !== 'all') {
+      query = query.eq('action', action)
+    }
+
+    if (status && status !== 'all') {
+      query = query.eq('status', status)
+    }
+
+    if (startDate) {
+      query = query.gte('created_at', new Date(startDate).toISOString())
+    }
+
+    if (endDate) {
+      const end = new Date(endDate)
+      end.setHours(23, 59, 59, 999)
+      query = query.lte('created_at', end.toISOString())
+    }
+
+    // Apply pagination
+    const { data, error, count } = await query.range(offset, offset + limit - 1)
+
+    if (error) throw error
 
     return NextResponse.json(
-      successResponse(filtered, 'Logs retrieved successfully')
+      successResponse(data || [], 'Logs retrieved successfully', {
+        page,
+        limit,
+        total: count || 0,
+      })
     )
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error fetching logs:', error)
     return NextResponse.json(
-      { success: false, error: 'Internal server error' },
+      { success: false, error: error.message || 'Internal server error' },
       { status: 500 }
     )
   }

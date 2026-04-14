@@ -51,6 +51,13 @@ export default function UsersPage() {
 
   useEffect(() => {
     fetchUsers();
+    
+    // Auto-refresh cada 10 segundos para sincronizar cambios del bot
+    const interval = setInterval(() => {
+      fetchUsers(searchTerm);
+    }, 10000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   const fetchUsers = async (search = '') => {

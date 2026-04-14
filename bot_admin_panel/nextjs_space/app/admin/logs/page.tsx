@@ -37,6 +37,13 @@ export default function LogsPage() {
 
   useEffect(() => {
     fetchLogs();
+    
+    // Auto-refresh cada 10 segundos
+    const interval = setInterval(() => {
+      fetchLogs(searchTerm, statusFilter, startDate, endDate);
+    }, 10000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   const fetchLogs = async (
