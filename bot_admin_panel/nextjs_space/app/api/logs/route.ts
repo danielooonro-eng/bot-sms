@@ -60,13 +60,15 @@ export async function GET(request: NextRequest) {
 
     if (error) throw error
 
-    return NextResponse.json(
-      successResponse(data || [], 'Logs retrieved successfully', {
+    const response = successResponse(data || [], 'Logs retrieved successfully')
+    return NextResponse.json({
+      ...response,
+      pagination: {
         page,
         limit,
         total: count || 0,
-      })
-    )
+      }
+    })
   } catch (error: any) {
     console.error('Error fetching logs:', error)
     return NextResponse.json(
